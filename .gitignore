@@ -1,0 +1,22 @@
+# Secretos — NUNCA subir
+.env
+
+# Entorno virtual
+.venv/
+
+# Datos descargados y base local
+data/raw/
+data/processed/
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+
+# Secretos de Streamlit (el theme .streamlit/config.toml SÍ se sube)
+.streamlit/secrets.toml
+
+# Configuración local de Claude Code / preview
+.claude/

@@ -1,0 +1,9 @@
+# Dependencias del proyecto (probadas con Python 3.9+ y en Streamlit Cloud).
+# Solo lo que se usa de verdad -> despliegue ligero.
+numpy>=1.26
+pandas>=2.1
+scipy>=1.11           # Poisson / Dixon-Coles
+pyyaml>=6.0           # leer config.yaml
+requests>=2.31        # descarga de datos
+streamlit>=1.30       # interfaz web
+altair>=5.0           # gráficos de la web

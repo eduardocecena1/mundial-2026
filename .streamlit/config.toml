@@ -1,0 +1,11 @@
+# Tema visual de la web (se ve bien en móvil y escritorio).
+[theme]
+base = "dark"
+primaryColor = "#22c55e"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#1a1f2b"
+textColor = "#e6e6e6"
+font = "sans serif"
+
+[server]
+headless = true

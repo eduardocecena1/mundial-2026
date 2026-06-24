@@ -1,0 +1,50 @@
+# config.yaml — Parámetros del proyecto de predicciones Mundial 2026.
+# Editable sin tocar código.
+
+datos:
+  # Desde qué fecha se carga el histórico (3 ciclos mundialistas).
+  desde: "2014-01-01"
+
+modelo:
+  # Vida media (en años) del decaimiento temporal: partidos más recientes pesan más.
+  # Dixon-Coles clásico usa ~0.5-1 año para clubes; para selecciones (juegan menos)
+  # conviene un valor mayor. Valor elegido por backtesting (ver src/backtesting).
+  vida_media_anios: 2.5
+
+  # Regularización L2 (ridge) sobre ataque/defensa: encoge hacia la media a los
+  # equipos con pocos datos. Valor elegido por backtesting (--tune).
+  reg: 0.5
+
+  # Peso relativo de cada tipo de torneo (los partidos más competitivos informan más).
+  pesos_torneo:
+    "FIFA World Cup": 1.00
+    "FIFA World Cup qualification": 0.85
+    "UEFA Euro": 0.90
+    "Copa América": 0.90
+    "African Cup of Nations": 0.85
+    "AFC Asian Cup": 0.80
+    "UEFA Nations League": 0.80
+    "CONCACAF Gold Cup": 0.75
+    "Friendly": 0.50          # los amistosos informan menos
+    "_defecto": 0.70          # cualquier otro torneo
+
+  # Máximo de goles a considerar en la matriz de marcadores (0..max por equipo).
+  max_goles: 8
+
+confianza:
+  # Umbrales de número de partidos jugados (desde 'datos.desde') para el nivel.
+  alto: 40
+  medio: 15
+  # por debajo de 'medio' -> confianza baja
+
+# Líneas de apuesta a evaluar
+apuestas:
+  lineas_goles: [1.5, 2.5, 3.5]
+  lineas_tarjetas: [3.5, 4.5]
+
+# Umbrales de probabilidad para clasificar las 3 "Leyes" (Fase 3)
+leyes:
+  segura_min: 0.68      # >= 68%  -> Ley Segura
+  arriesgada_min: 0.45  # 45-65%  -> Ley Arriesgada
+  arriesgada_max: 0.65
+  # por debajo -> material para la Ley Soñador
