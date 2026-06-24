@@ -185,6 +185,38 @@ def render_tarjeta_partido(con, modelo, cfg, row):
                     f"sin goles {100*fa['sin_goles']:.0f}%")
 
 
+def render_historico(version: str):
+    """Calcula y dibuja el histórico de aciertos (entrena el modelo por jornada)."""
+    hist = cargar_historico(version)
+    if not hist["fechas"]:
+        st.info("Aún no hay jornadas jugadas para evaluar.")
+        return
+    tot = hist["totales"]
+    etiquetas = {"segura": "🔒 Segura", "arriesgada": "⚖️ Arriesgada",
+                 "sonador": "🚀 Soñador"}
+    cols = st.columns(3)
+    for col, tier in zip(cols, ("segura", "arriesgada", "sonador")):
+        a, t = tot[tier]
+        pct = (100 * a / t) if t else 0
+        col.metric(etiquetas[tier], f"{pct:.0f}% aciertos", f"{a}/{t}")
+
+    filas = []
+    for f in hist["fechas"]:
+        for tier in ("segura", "arriesgada", "sonador"):
+            a, t = f[tier]
+            if t:
+                filas.append({"fecha": f["fecha"], "Ley": etiquetas[tier],
+                              "acierto_%": 100 * a / t})
+    df = pd.DataFrame(filas)
+    if not df.empty:
+        chart = (alt.Chart(df).mark_line(point=True)
+                 .encode(x="fecha:N", y=alt.Y("acierto_%:Q",
+                                              scale=alt.Scale(domain=[0, 100])),
+                         color="Ley:N", tooltip=["fecha", "Ley", "acierto_%"])
+                 .properties(height=320))
+        st.altair_chart(chart, use_container_width=True)
+
+
 # --- App --------------------------------------------------------------------
 
 def main():
@@ -284,40 +316,20 @@ def main():
                 with cols[k % 2]:
                     render_tarjeta_partido(con, modelo, cfg, row)
 
-    # --- TAB 3: histórico de aciertos ---
+    # --- TAB 3: histórico de aciertos (bajo demanda, para no frenar la carga) ---
     with tab3:
         st.subheader("¿Qué tan bien ha acertado el modelo en este Mundial?")
         st.caption("Cada jornada se predice entrenando SOLO con datos previos "
                    "(sin trampa).")
-        hist = cargar_historico(version)
-        if not hist["fechas"]:
-            st.info("Aún no hay jornadas jugadas para evaluar.")
+        if st.session_state.get("calc_hist"):
+            render_historico(version)
+        elif st.button("📊 Calcular histórico de aciertos"):
+            st.session_state["calc_hist"] = True
+            st.rerun()
         else:
-            tot = hist["totales"]
-            etiquetas = {"segura": "🔒 Segura", "arriesgada": "⚖️ Arriesgada",
-                         "sonador": "🚀 Soñador"}
-            cols = st.columns(3)
-            for col, tier in zip(cols, ("segura", "arriesgada", "sonador")):
-                a, t = tot[tier]
-                pct = (100 * a / t) if t else 0
-                col.metric(etiquetas[tier], f"{pct:.0f}% aciertos", f"{a}/{t}")
-
-            # Gráfico por fecha (aciertos acumulados de la Ley Segura)
-            filas = []
-            for f in hist["fechas"]:
-                for tier in ("segura", "arriesgada", "sonador"):
-                    a, t = f[tier]
-                    if t:
-                        filas.append({"fecha": f["fecha"], "Ley": etiquetas[tier],
-                                      "acierto_%": 100 * a / t})
-            df = pd.DataFrame(filas)
-            if not df.empty:
-                chart = (alt.Chart(df).mark_line(point=True)
-                         .encode(x="fecha:N", y=alt.Y("acierto_%:Q",
-                                                      scale=alt.Scale(domain=[0, 100])),
-                                 color="Ley:N", tooltip=["fecha", "Ley", "acierto_%"])
-                         .properties(height=320))
-                st.altair_chart(chart, use_container_width=True)
+            st.info("Pulsa el botón para ver cómo ha acertado cada Ley en las "
+                    "jornadas ya jugadas. (Tarda unos segundos: entrena el modelo "
+                    "en cada fecha pasada.)")
 
     con.close()
 
