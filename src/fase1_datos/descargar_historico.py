@@ -43,7 +43,11 @@ def _descargar_csv(url: str) -> pd.DataFrame:
     resp = requests.get(url, timeout=60)
     resp.raise_for_status()
     nombre = url.rsplit("/", 1)[-1]
-    (db.RAIZ_PROYECTO / "data" / "raw" / nombre).write_bytes(resp.content)
+    # Asegurar que data/raw/ exista (en la nube no se crea sola: git no sube
+    # carpetas vacías). Evita FileNotFoundError al guardar la copia local.
+    raw_dir = db.RAIZ_PROYECTO / "data" / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    (raw_dir / nombre).write_bytes(resp.content)
     return pd.read_csv(io.StringIO(resp.text))
 
 
