@@ -56,7 +56,8 @@ def _mejor_no_trivial(candidatos, pmin, pmax=1.01):
     """Devuelve el candidato de mayor probabilidad dentro de [pmin, pmax],
     evitando los 'Más de 1.5' que casi siempre son triviales en la Ley Segura."""
     elegibles = [c for c in candidatos if pmin <= c[3] <= pmax
-                 and not (c[0] == "OU" and c[1] == "over_1.5")]
+                 and not (c[0] == "OU" and c[1] == "over_1.5")
+                 and c[0] != "Hcap"]  # el hándicap no se usa en picks auto (ambiguo de evaluar)
     if not elegibles:
         return None
     return max(elegibles, key=lambda c: c[3])

@@ -58,6 +58,24 @@ CSS = """
   .seg-v  { background:#60a5fa; display:flex; align-items:center; justify-content:center;}
   .chip   { display:inline-block; padding:2px 9px; border-radius:999px;
             font-size:.72rem; font-weight:700; }
+  /* Boletos estilo casa de apuestas */
+  .ticket { border-radius:12px; padding:12px 16px; margin:10px 0;
+            border:1px solid rgba(255,255,255,.10);
+            background:repeating-linear-gradient(45deg,rgba(255,255,255,.02),
+                       rgba(255,255,255,.02) 12px,transparent 12px,transparent 24px); }
+  .ticket.won  { border-left:6px solid #22c55e; }
+  .ticket.lost { border-left:6px solid #ef4444; opacity:.85; }
+  .ticket.void { border-left:6px solid #888; opacity:.7; }
+  .tk-head { display:flex; justify-content:space-between; align-items:center;
+             margin-bottom:6px; }
+  .tk-fecha{ font-weight:700; font-size:.95rem; }
+  .tk-badge{ font-weight:800; font-size:.82rem; padding:3px 12px; border-radius:999px; }
+  .b-won { background:#22c55e22; color:#22c55e; border:1px solid #22c55e66; }
+  .b-lost{ background:#ef444422; color:#ef4444; border:1px solid #ef444466; }
+  .b-void{ background:#88888822; color:#aaa; border:1px solid #88888866; }
+  .tk-leg { font-size:.86rem; padding:2px 0; }
+  .tk-foot{ margin-top:7px; font-size:.85rem; opacity:.9;
+            display:flex; justify-content:space-between; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -215,6 +233,61 @@ def render_historico(version: str):
                          color="Ley:N", tooltip=["fecha", "Ley", "acierto_%"])
                  .properties(height=320))
         st.altair_chart(chart, use_container_width=True)
+
+    render_parlays(hist)
+
+
+def render_parlays(hist: dict):
+    """Historial de combinadas (parlays) estilo casa de apuestas: boletos con
+    sus patas, cuota y marcador GANADO/PERDIDO + balance de fichas."""
+    parlays = hist.get("parlays", [])
+    if not parlays:
+        return
+    st.markdown("---")
+    st.markdown("### 🎟️ Historial de combinadas (la del día con los picks más seguros)")
+
+    res = hist.get("parlay_totales", {})
+    jug, gan = res.get("jugados", 0), res.get("ganados", 0)
+    bal = res.get("balance", 0.0)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Combinadas pegadas", f"{gan}/{jug}",
+              f"{(100*gan/jug):.0f}%" if jug else "s/d")
+    c2.metric("Balance (1 ficha por día)", f"{bal:+.2f} fichas",
+              "vas ganando" if bal > 0 else ("vas perdiendo" if bal < 0 else "en cero"),
+              delta_color="normal" if bal >= 0 else "inverse")
+    c3.metric("Días jugados", f"{jug}")
+
+    st.caption("Cada día se arma un boleto con los picks más seguros. Gana solo si "
+               "**todas** las patas pegan, como en una combinada real.")
+
+    # Boletos, del más reciente al más antiguo
+    for p in reversed(parlays):
+        if p["acerto"] is True:
+            clase, badge_cls, badge = "won", "b-won", "GANADO ✅"
+            extra = f"+{p['pago']-1:.2f} fichas"
+        elif p["acerto"] is False:
+            clase, badge_cls, badge = "lost", "b-lost", "PERDIDO ❌"
+            extra = "-1.00 fichas"
+        else:
+            clase, badge_cls, badge = "void", "b-void", "ANULADO ➖"
+            extra = "sin contar"
+        legs_html = ""
+        for leg in p["legs"]:
+            marca = "✅" if leg["ok"] is True else ("❌" if leg["ok"] is False else "➖")
+            legs_html += f"<div class='tk-leg'>{marca} {leg['texto']}</div>"
+        st.markdown(
+            f"""<div class='ticket {clase}'>
+                  <div class='tk-head'>
+                    <span class='tk-fecha'>📅 {p['fecha']}</span>
+                    <span class='tk-badge {badge_cls}'>{badge}</span>
+                  </div>
+                  {legs_html}
+                  <div class='tk-foot'>
+                    <span>cuota combinada ×{p['pago']}</span><span>{extra}</span>
+                  </div>
+                </div>""",
+            unsafe_allow_html=True,
+        )
 
 
 # --- App --------------------------------------------------------------------

@@ -98,6 +98,7 @@ def evaluar_rango(con, cfg, desde="2026-06-01", hasta="2026-12-31") -> dict:
     fechas = _fechas_jugadas(con, desde, hasta)
     tot = {"segura": [0, 0], "arriesgada": [0, 0], "sonador": [0, 0]}
     por_fecha = []
+    parlays = []
 
     for fecha in fechas:
         # Entrenar con corte en la fecha: no usar el resultado del propio día
@@ -115,9 +116,59 @@ def evaluar_rango(con, cfg, desde="2026-06-01", hasta="2026-12-31") -> dict:
             tot[tier][0] += a
             tot[tier][1] += t
             fila[tier] = [a, t]
+
+        # Combinada (parlay) del día: los picks más seguros, como en la app.
+        # Gana SOLO si todas las patas pegan (igual que un boleto real).
+        p = _evaluar_parlay(con, leyes["segura"], fecha)
+        fila["parlay"] = p
+        if p:
+            parlays.append(p)
         por_fecha.append(fila)
 
-    return {"fechas": por_fecha, "totales": tot}
+    return {"fechas": por_fecha, "totales": tot,
+            "parlays": parlays, "parlay_totales": _resumen_parlays(parlays)}
+
+
+def _evaluar_parlay(con, segura, fecha):
+    """Construye y evalúa la combinada del día (hasta 3 picks más seguros).
+    Devuelve None si no hay al menos 2 picks. 'acerto' es True/False, o None si
+    alguna pata no se pudo evaluar (boleto anulado)."""
+    if len(segura) < 2:
+        return None
+    legs_src = segura[:3]
+    legs = []
+    oks = []
+    prob = 1.0
+    for r in legs_src:
+        ok = evaluar(con, r, fecha)
+        oks.append(ok)
+        prob *= r["prob"]
+        legs.append({"texto": f"{r['partido']}: {r['apuesta']}", "ok": ok})
+    if any(o is None for o in oks):
+        acerto = None
+    elif all(o is True for o in oks):
+        acerto = True
+    else:
+        acerto = False
+    return {"fecha": fecha, "legs": legs, "prob": prob,
+            "pago": round(1.0 / max(prob, 0.01), 2), "acerto": acerto}
+
+
+def _resumen_parlays(parlays):
+    """Totales tipo casa de apuestas: jugados, ganados y balance de fichas
+    (apostando 1 ficha por combinada cada día)."""
+    jugados = ganados = 0
+    balance = 0.0
+    for p in parlays:
+        if p["acerto"] is None:
+            continue  # boleto anulado: no cuenta
+        jugados += 1
+        if p["acerto"]:
+            ganados += 1
+            balance += p["pago"] - 1.0
+        else:
+            balance -= 1.0
+    return {"jugados": jugados, "ganados": ganados, "balance": round(balance, 2)}
 
 
 def correr(con, cfg, desde="2026-06-01", hasta="2026-12-31"):
