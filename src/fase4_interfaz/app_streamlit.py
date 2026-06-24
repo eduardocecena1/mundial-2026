@@ -32,7 +32,9 @@ from src.fase1_datos import db
 from src.fase2_modelo.entrenar import cargar_config, entrenar_modelo
 from src.fase2_modelo.predecir_partido import predecir
 from src.fase3_recomendacion.generar_leyes import generar
-from src.fase4_interfaz.seguimiento import evaluar_rango
+from src.fase4_interfaz.seguimiento import (
+    evaluar_rango, evaluar, _resultado_partido, _evaluar_parlay,
+)
 
 
 # --- Configuración de página -----------------------------------------------
@@ -45,11 +47,27 @@ CSS = """
   .bloque { border-radius: 14px; padding: 16px 18px; margin-bottom: 14px;
             border: 1px solid rgba(255,255,255,.08); }
   .pick   { background: rgba(255,255,255,.04); border-radius: 10px;
-            padding: 10px 14px; margin: 8px 0; }
-  .pick .top { display:flex; justify-content:space-between; align-items:baseline; }
+            padding: 10px 14px; margin: 8px 0; border-left:4px solid transparent; }
+  .pick.won  { border-left-color:#22c55e; background:rgba(34,197,94,.08); }
+  .pick.lost { border-left-color:#ef4444; background:rgba(239,68,68,.07); }
+  .pick.pend { border-left-color:#eab308; }
+  .pick .top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
   .pick .ap  { font-size: 1.05rem; font-weight: 600; }
   .pick .pr  { font-size: 1.35rem; font-weight: 800; }
   .pick .mt  { font-size: .80rem; opacity: .70; margin-top: 4px; }
+  .res-badge { font-weight:800; font-size:.74rem; padding:3px 10px; border-radius:999px;
+               white-space:nowrap; }
+  .r-won { background:#22c55e22; color:#22c55e; border:1px solid #22c55e66; }
+  .r-lost{ background:#ef444422; color:#ef4444; border:1px solid #ef444466; }
+  .r-pend{ background:#eab30822; color:#eab308; border:1px solid #eab30866; }
+  .score { font-size:.8rem; opacity:.85; font-weight:700; }
+  /* Cabecera estilo casino */
+  .casino-hd { background:linear-gradient(135deg,#0b3d20,#0e1117 70%);
+               border:1px solid #22c55e44; border-radius:14px; padding:14px 18px;
+               margin-bottom:10px; box-shadow:0 0 24px rgba(34,197,94,.12) inset; }
+  .casino-hd .t { font-size:1.5rem; font-weight:900; letter-spacing:.5px; }
+  .neon { color:#22c55e; text-shadow:0 0 8px rgba(34,197,94,.6); }
+  .gold { color:#f5c542; text-shadow:0 0 8px rgba(245,197,66,.45); }
   .pago   { font-size:.85rem; opacity:.8; }
   .barra  { display:flex; height: 26px; border-radius: 7px; overflow:hidden;
             font-size:.72rem; font-weight:700; color:#0b0b0b; }
@@ -145,15 +163,27 @@ def chip_confianza(nivel: str) -> str:
             f"border:1px solid {c}55'>confianza {nivel}</span>")
 
 
-def render_pick(rec: dict):
+def render_pick(rec: dict, con, fecha: str):
+    """Dibuja un pick como ficha de apuesta, mostrando AUTOMÁTICAMENTE si pegó o
+    no (con el marcador real) en cuanto el partido se juega."""
     chip = chip_confianza(rec["confianza"])
+    res = evaluar(con, rec, fecha)
+    score = _resultado_partido(con, rec["local"], rec["visitante"], fecha)
+    if res is True:
+        clase = "won"; badge = "<span class='res-badge r-won'>PEGÓ ✅</span>"
+    elif res is False:
+        clase = "lost"; badge = "<span class='res-badge r-lost'>NO PEGÓ ❌</span>"
+    else:
+        clase = "pend"; badge = "<span class='res-badge r-pend'>EN JUEGO ⏳</span>"
+    score_txt = (f"<span class='score'>· marcador {score[0]}-{score[1]}</span>"
+                 if score else "<span class='score'>· aún no se juega</span>")
     st.markdown(
-        f"""<div class='pick'>
+        f"""<div class='pick {clase}'>
               <div class='top'>
                 <span class='ap'>{rec['partido']} — {rec['apuesta']}</span>
                 <span class='pr'>{100*rec['prob']:.0f}%</span>
               </div>
-              <div class='pago'>pago potencial ×{rec['pago']} &nbsp; {chip}</div>
+              <div class='pago'>pago ×{rec['pago']} &nbsp; {chip} &nbsp; {badge} {score_txt}</div>
               <div class='mt'>↳ {rec['motivo']}</div>
             </div>""",
         unsafe_allow_html=True,
@@ -237,6 +267,39 @@ def render_historico(version: str):
     render_parlays(hist)
 
 
+def render_ticket(p: dict, mostrar_fecha: bool = True):
+    """Dibuja UN boleto de combinada estilo casino, con su resultado en vivo:
+    GANADO / PERDIDO / EN JUEGO / ANULADO, y cada pata con ✅/❌/⏳."""
+    legs = p["legs"]
+    pendiente = all(l["ok"] is None for l in legs)
+    if p["acerto"] is True:
+        clase, bcls, badge, extra = "won", "b-won", "GANADO ✅", f"+{p['pago']-1:.2f} fichas"
+    elif p["acerto"] is False:
+        clase, bcls, badge, extra = "lost", "b-lost", "PERDIDO ❌", "-1.00 fichas"
+    elif pendiente:
+        clase, bcls, badge, extra = "void", "b-void", "EN JUEGO ⏳", f"cuota ×{p['pago']}"
+    else:
+        clase, bcls, badge, extra = "void", "b-void", "ANULADO ➖", "sin contar"
+    legs_html = ""
+    for leg in legs:
+        marca = "✅" if leg["ok"] is True else ("❌" if leg["ok"] is False else "⏳")
+        legs_html += f"<div class='tk-leg'>{marca} {leg['texto']}</div>"
+    titulo = (f"📅 {p['fecha']}" if mostrar_fecha else "🎟️ Boleto del día")
+    st.markdown(
+        f"""<div class='ticket {clase}'>
+              <div class='tk-head'>
+                <span class='tk-fecha'>{titulo}</span>
+                <span class='tk-badge {bcls}'>{badge}</span>
+              </div>
+              {legs_html}
+              <div class='tk-foot'>
+                <span>cuota combinada ×{p['pago']}</span><span>{extra}</span>
+              </div>
+            </div>""",
+        unsafe_allow_html=True,
+    )
+
+
 def render_parlays(hist: dict):
     """Historial de combinadas (parlays) estilo casa de apuestas: boletos con
     sus patas, cuota y marcador GANADO/PERDIDO + balance de fichas."""
@@ -262,40 +325,20 @@ def render_parlays(hist: dict):
 
     # Boletos, del más reciente al más antiguo
     for p in reversed(parlays):
-        if p["acerto"] is True:
-            clase, badge_cls, badge = "won", "b-won", "GANADO ✅"
-            extra = f"+{p['pago']-1:.2f} fichas"
-        elif p["acerto"] is False:
-            clase, badge_cls, badge = "lost", "b-lost", "PERDIDO ❌"
-            extra = "-1.00 fichas"
-        else:
-            clase, badge_cls, badge = "void", "b-void", "ANULADO ➖"
-            extra = "sin contar"
-        legs_html = ""
-        for leg in p["legs"]:
-            marca = "✅" if leg["ok"] is True else ("❌" if leg["ok"] is False else "➖")
-            legs_html += f"<div class='tk-leg'>{marca} {leg['texto']}</div>"
-        st.markdown(
-            f"""<div class='ticket {clase}'>
-                  <div class='tk-head'>
-                    <span class='tk-fecha'>📅 {p['fecha']}</span>
-                    <span class='tk-badge {badge_cls}'>{badge}</span>
-                  </div>
-                  {legs_html}
-                  <div class='tk-foot'>
-                    <span>cuota combinada ×{p['pago']}</span><span>{extra}</span>
-                  </div>
-                </div>""",
-            unsafe_allow_html=True,
-        )
+        render_ticket(p, mostrar_fecha=True)
 
 
 # --- App --------------------------------------------------------------------
 
 def main():
-    st.title("⚽ Predicciones Mundial 2026")
-    st.caption("Juego amistoso entre amigos · diversión y presumir aciertos · "
-               "**no es asesoría de apuestas reales con dinero**")
+    st.markdown(
+        "<div class='casino-hd'>"
+        "<span class='t'>🎰 <span class='neon'>MUNDIAL 2026</span> "
+        "<span class='gold'>BETS</span> ⚽</span><br>"
+        "<span style='opacity:.8;font-size:.88rem'>Picks del día · combinadas · "
+        "histórico de aciertos — juego amistoso entre amigos, "
+        "<b>no es apuesta real con dinero</b></span></div>",
+        unsafe_allow_html=True)
 
     # Frescura automática diaria: descarga datos nuevos una vez al día al abrir.
     hoy = date.today().isoformat()
@@ -341,12 +384,17 @@ def main():
             leyes = generar(con, modelo, cfg, fecha)
             st.subheader(f"Partidos del {fecha} · {len(partidos)} encuentros")
 
+            # 🎟️ Boleto del día: combinada de los más seguros, con resultado en vivo
+            parlay_dia = _evaluar_parlay(con, leyes["segura"], fecha)
+            if parlay_dia:
+                render_ticket(parlay_dia, mostrar_fecha=False)
+
             st.markdown("<div class='bloque' style='background:rgba(34,197,94,.10)'>",
                         unsafe_allow_html=True)
             st.markdown("### 🔒 Ley Segura  ·  alta probabilidad, bajo riesgo")
             if leyes["segura"]:
                 for r in leyes["segura"]:
-                    render_pick(r)
+                    render_pick(r, con, fecha)
             else:
                 st.caption("Hoy ningún partido alcanza el umbral de seguridad.")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -356,7 +404,7 @@ def main():
             st.markdown("### ⚖️ Ley Arriesgada  ·  probabilidad media, mejor pago")
             if leyes["arriesgada"]:
                 for r in leyes["arriesgada"]:
-                    render_pick(r)
+                    render_pick(r, con, fecha)
             else:
                 st.caption("Sin candidatos en la banda media hoy.")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -365,18 +413,7 @@ def main():
                         unsafe_allow_html=True)
             st.markdown("### 🚀 Ley Soñador  ·  baja probabilidad, alto valor")
             for r in leyes["sonador"]:
-                render_pick(r)
-            if leyes["parlay"]:
-                p = leyes["parlay"]
-                lista = "<br>".join(f"➕ {a}" for a in p["apuestas"])
-                st.markdown(
-                    f"""<div class='pick'>
-                          <div class='ap'>🎟️ Combinada soñadora del día</div>
-                          <div class='mt'>{lista}</div>
-                          <div class='pago' style='margin-top:6px'>
-                            probabilidad {100*p['prob']:.0f}% · pago ×{p['pago']}</div>
-                        </div>""",
-                    unsafe_allow_html=True)
+                render_pick(r, con, fecha)
             st.markdown("</div>", unsafe_allow_html=True)
 
     # --- TAB 2: detalle por partido ---
