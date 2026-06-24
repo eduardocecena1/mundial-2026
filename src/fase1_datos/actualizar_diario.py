@@ -33,6 +33,19 @@ def actualizar(con) -> None:
     cargar_goleadores(con, df_goles, DESDE_DEFECTO)
     cargar_shootouts(con, df_shoot, DESDE_DEFECTO)
     derivar_equipos(con)
+
+    # Marcadores en vivo/finales de ESPN para hoy y ayer (martj42 sube con retraso).
+    from datetime import timedelta
+    from . import marcadores_vivo as mv
+    hoy = date.today()
+    for d in (hoy, hoy - timedelta(days=1)):
+        try:
+            res = mv.aplicar(con, d.isoformat())
+            if res["finales"]:
+                print(f"  ESPN: {res['finales']} resultados finales aplicados ({d})")
+        except Exception:
+            pass  # si ESPN falla, seguimos con lo de martj42
+
     db.set_meta(con, "ultima_actualizacion", date.today().isoformat())
 
 

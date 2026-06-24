@@ -29,6 +29,7 @@ if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
 from src.fase1_datos import db
+from src.fase1_datos import marcadores_vivo as mv
 from src.fase2_modelo.entrenar import cargar_config, entrenar_modelo
 from src.fase2_modelo.predecir_partido import predecir
 from src.fase3_recomendacion.generar_leyes import generar
@@ -137,6 +138,16 @@ def cargar_modelo_y_cfg(version: str):
     return modelo, cfg
 
 
+@st.cache_data(ttl=90, show_spinner=False)
+def marcadores_live(fecha: str, version: str) -> dict:
+    """Aplica marcadores en vivo/finales de ESPN para la fecha (cada ~90 s).
+    Rellena los partidos terminados y devuelve los que están en curso."""
+    con = db.conectar()
+    res = mv.aplicar(con, fecha)
+    con.close()
+    return res
+
+
 @st.cache_data(show_spinner="Calculando histórico de aciertos...")
 def cargar_historico(version: str):
     con = db.conectar()
@@ -163,20 +174,27 @@ def chip_confianza(nivel: str) -> str:
             f"border:1px solid {c}55'>confianza {nivel}</span>")
 
 
-def render_pick(rec: dict, con, fecha: str):
+def render_pick(rec: dict, con, fecha: str, live: dict = None):
     """Dibuja un pick como ficha de apuesta, mostrando AUTOMÁTICAMENTE si pegó o
-    no (con el marcador real) en cuanto el partido se juega."""
+    no (con el marcador real) en cuanto el partido se juega, o el marcador EN VIVO
+    si está en curso."""
     chip = chip_confianza(rec["confianza"])
     res = evaluar(con, rec, fecha)
     score = _resultado_partido(con, rec["local"], rec["visitante"], fecha)
+    vivo = (live or {}).get("vivo", {}).get((rec["local"], rec["visitante"]))
     if res is True:
         clase = "won"; badge = "<span class='res-badge r-won'>PEGÓ ✅</span>"
+        score_txt = f"<span class='score'>· marcador {score[0]}-{score[1]}</span>"
     elif res is False:
         clase = "lost"; badge = "<span class='res-badge r-lost'>NO PEGÓ ❌</span>"
+        score_txt = f"<span class='score'>· marcador {score[0]}-{score[1]}</span>"
+    elif vivo:
+        clase = "pend"
+        badge = f"<span class='res-badge r-pend'>🔴 EN VIVO {vivo['gl']}-{vivo['gv']}</span>"
+        score_txt = f"<span class='score'>· {vivo['estado']}</span>"
     else:
         clase = "pend"; badge = "<span class='res-badge r-pend'>EN JUEGO ⏳</span>"
-    score_txt = (f"<span class='score'>· marcador {score[0]}-{score[1]}</span>"
-                 if score else "<span class='score'>· aún no se juega</span>")
+        score_txt = "<span class='score'>· aún no se juega</span>"
     st.markdown(
         f"""<div class='pick {clase}'>
               <div class='top'>
@@ -370,6 +388,8 @@ def main():
         "⚖️ Arriesgada · prob. media\n\n🚀 Soñador · alto riesgo")
 
     modelo, cfg = cargar_modelo_y_cfg(version)
+    # Marcadores en vivo/finales de ESPN para la fecha elegida (rellena terminados).
+    live = marcadores_live(fecha, version)
     con = db.conectar()
     partidos = db.calendario_de_fecha(con, fecha)
 
@@ -394,7 +414,7 @@ def main():
             st.markdown("### 🔒 Ley Segura  ·  alta probabilidad, bajo riesgo")
             if leyes["segura"]:
                 for r in leyes["segura"]:
-                    render_pick(r, con, fecha)
+                    render_pick(r, con, fecha, live)
             else:
                 st.caption("Hoy ningún partido alcanza el umbral de seguridad.")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -404,7 +424,7 @@ def main():
             st.markdown("### ⚖️ Ley Arriesgada  ·  probabilidad media, mejor pago")
             if leyes["arriesgada"]:
                 for r in leyes["arriesgada"]:
-                    render_pick(r, con, fecha)
+                    render_pick(r, con, fecha, live)
             else:
                 st.caption("Sin candidatos en la banda media hoy.")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -413,7 +433,7 @@ def main():
                         unsafe_allow_html=True)
             st.markdown("### 🚀 Ley Soñador  ·  baja probabilidad, alto valor")
             for r in leyes["sonador"]:
-                render_pick(r, con, fecha)
+                render_pick(r, con, fecha, live)
             st.markdown("</div>", unsafe_allow_html=True)
 
     # --- TAB 2: detalle por partido ---
