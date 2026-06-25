@@ -324,17 +324,22 @@ def render_historico(version: str):
         return
     tot = hist["totales"]
     combo = hist.get("combinada_totales", {})
+    combo_l = hist.get("combinada_largo_totales", {})
     etiquetas = {"segura": "🔒 Parlay Seguro", "arriesgada": "⚖️ Parlay Intermedio",
                  "sonador": "🚀 Parlay Soñador"}
-    st.markdown("**Combinada completa** = el parlay corto (3 patas) pega solo si "
-                "**todas** sus patas pegan juntas (como un boleto real).")
+    st.markdown("**Combinada completa** = el parlay pega solo si **todas** sus patas "
+                "pegan juntas (como un boleto real). Se mide el **corto** (3 patas) y "
+                "el **largo** (todos los juegos del día).")
     cols = st.columns(3)
     for col, tier in zip(cols, ("segura", "arriesgada", "sonador")):
         pg, pj = combo.get(tier, [0, 0])
+        lg, lj = combo_l.get(tier, [0, 0])
         a, t = tot[tier]
-        pct = (100 * pg / pj) if pj else 0
-        col.metric(etiquetas[tier], f"{pg}/{pj} días",
-                   f"{pct:.0f}% pegó la combinada completa")
+        col.markdown(f"**{etiquetas[tier]}**")
+        col.metric("🎟️ Corto (3 patas)", f"{pg}/{pj} días",
+                   f"{(100*pg/pj if pj else 0):.0f}% pegó completa", delta_color="off")
+        col.metric("🧱 Largo (todos los juegos)", f"{lg}/{lj} días",
+                   f"{(100*lg/lj if lj else 0):.0f}% pegó completa", delta_color="off")
         col.caption(f"picks sueltos: {a}/{t} ({100*a/t:.0f}%)" if t else "—")
 
     # Gráfico: % de picks sueltos que pegaron por jornada

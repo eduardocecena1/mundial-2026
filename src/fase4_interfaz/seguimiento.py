@@ -98,9 +98,20 @@ def evaluar_rango(con, cfg, desde="2026-06-01", hasta="2026-12-31") -> dict:
     n_corto = cfg.get("leyes", {}).get("max_picks", 3)  # nº de patas del parlay "corto"
     fechas = _fechas_jugadas(con, desde, hasta)
     tot = {"segura": [0, 0], "arriesgada": [0, 0], "sonador": [0, 0]}        # picks sueltos
-    combo = {"segura": [0, 0], "arriesgada": [0, 0], "sonador": [0, 0]}      # combinada (corto)
+    combo = {"segura": [0, 0], "arriesgada": [0, 0], "sonador": [0, 0]}      # combinada corta
+    combo_largo = {"segura": [0, 0], "arriesgada": [0, 0], "sonador": [0, 0]}  # combinada larga
     por_fecha = []
     parlays = []
+
+    def _acumula_combo(acc, oks_sub, fila, clave):
+        """Suma 1 día ganado/jugado si TODAS las patas son evaluables."""
+        if oks_sub and all(o is not None for o in oks_sub):
+            gano = all(oks_sub)
+            acc[0] += 1 if gano else 0
+            acc[1] += 1
+            fila[clave] = 1 if gano else 0
+        else:
+            fila[clave] = None
 
     for fecha in fechas:
         # Entrenar con corte en la fecha: no usar el resultado del propio día
@@ -115,16 +126,10 @@ def evaluar_rango(con, cfg, desde="2026-06-01", hasta="2026-12-31") -> dict:
             tot[tier][0] += a
             tot[tier][1] += t
             fila[tier] = [a, t]
-            # COMBINADA del parlay CORTO (top 3): pega solo si TODAS sus patas
-            # pegan. Solo cuenta cuando todas son evaluables (partidos terminados).
-            oks_corto = oks[:n_corto]
-            if oks_corto and all(o is not None for o in oks_corto):
-                gano = all(oks_corto)
-                combo[tier][0] += 1 if gano else 0
-                combo[tier][1] += 1
-                fila[tier + "_combo"] = 1 if gano else 0
-            else:
-                fila[tier + "_combo"] = None
+            # COMBINADA CORTA (top 3) y LARGA (todas): pegan solo si TODAS sus
+            # patas pegan, y solo cuentan cuando todas son evaluables.
+            _acumula_combo(combo[tier], oks[:n_corto], fila, tier + "_combo")
+            _acumula_combo(combo_largo[tier], oks, fila, tier + "_combo_largo")
 
         # Boleto visual de la combinada SEGURA corta del día (top 3 patas).
         p = _evaluar_parlay(con, leyes["segura"][:n_corto], fecha)
@@ -134,6 +139,7 @@ def evaluar_rango(con, cfg, desde="2026-06-01", hasta="2026-12-31") -> dict:
         por_fecha.append(fila)
 
     return {"fechas": por_fecha, "totales": tot, "combinada_totales": combo,
+            "combinada_largo_totales": combo_largo,
             "parlays": parlays, "parlay_totales": _resumen_parlays(parlays)}
 
 
@@ -201,10 +207,12 @@ def correr(con, cfg, desde="2026-06-01", hasta="2026-12-31"):
     for tier in ("segura", "arriesgada", "sonador"):
         a, t = datos["totales"][tier]
         pg, pj = datos["combinada_totales"][tier]
+        lg, lj = datos["combinada_largo_totales"][tier]
         pct = f"{100*a/t:.0f}%" if t else "s/d"
         pctc = f"{100*pg/pj:.0f}%" if pj else "s/d"
-        print(f"  {etiquetas[tier]:16s}: combinada completa {pg}/{pj} ({pctc})  "
-              f"|  picks sueltos {a}/{t} ({pct})")
+        pctl = f"{100*lg/lj:.0f}%" if lj else "s/d"
+        print(f"  {etiquetas[tier]:16s}: corta {pg}/{pj} ({pctc})  |  "
+              f"larga {lg}/{lj} ({pctl})  |  picks sueltos {a}/{t} ({pct})")
 
 
 def main():
