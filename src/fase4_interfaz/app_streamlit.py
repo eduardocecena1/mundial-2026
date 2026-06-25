@@ -143,7 +143,7 @@ def cargar_modelo_y_cfg(version: str):
     return modelo, cfg
 
 
-@st.cache_data(ttl=90, show_spinner=False)
+@st.cache_data(ttl=45, show_spinner=False)
 def marcadores_live(fecha: str, version: str) -> dict:
     """Aplica marcadores en vivo/finales de ESPN para la fecha (cada ~90 s).
     Rellena los partidos terminados y devuelve los que están en curso."""
@@ -486,6 +486,16 @@ def main():
         "**Leyenda**\n\n🔒 Parlay Seguro · alta prob.\n\n"
         "⚖️ Parlay Intermedio · prob. media\n\n🚀 Parlay Soñador · alto riesgo")
 
+    st.sidebar.caption("🔴 EN VIVO · la app se actualiza sola cada ~60 s")
+
+    # Cuerpo auto-refrescable (marcadores en vivo sin recargar la página).
+    cuerpo(version, fecha)
+
+
+@st.fragment(run_every=60)
+def cuerpo(version: str, fecha: str):
+    """Cuerpo de la app. Se AUTO-REFRESCA cada 60 s gracias a st.fragment, así los
+    partidos que van terminando muestran su resultado solos, sin recargar."""
     modelo, cfg = cargar_modelo_y_cfg(version)
     # Marcadores en vivo/finales de ESPN para la fecha elegida (rellena terminados).
     live = marcadores_live(fecha, version)
