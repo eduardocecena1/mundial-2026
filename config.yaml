@@ -44,6 +44,7 @@ apuestas:
 
 # Umbrales de probabilidad para clasificar las 3 "Leyes" (Fase 3)
 leyes:
+  max_picks: 3          # nº de patas por parlay (las de mayor probabilidad)
   segura_min: 0.68      # >= 68%  -> Ley Segura
   arriesgada_min: 0.45  # 45-65%  -> Ley Arriesgada
   arriesgada_max: 0.65
