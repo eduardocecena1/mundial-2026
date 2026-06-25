@@ -174,11 +174,25 @@ def chip_confianza(nivel: str) -> str:
             f"border:1px solid {c}55'>confianza {nivel}</span>")
 
 
+def _hora_orden(live: dict, local: str, visit: str) -> str:
+    """Clave para ordenar partidos por horario (ISO UTC; sin hora van al final)."""
+    h = (live or {}).get("horarios", {}).get((local, visit))
+    return h["utc"] if h and h.get("utc") else "9999"
+
+
+def _hora_mx(live: dict, local: str, visit: str):
+    """Hora del partido 'HH:MM' en hora centro de México, o None si no se conoce."""
+    h = (live or {}).get("horarios", {}).get((local, visit))
+    return h["mx"] if h and h.get("mx") else None
+
+
 def render_pick(rec: dict, con, fecha: str, live: dict = None):
     """Dibuja un pick como ficha de apuesta, mostrando AUTOMÁTICAMENTE si pegó o
     no (con el marcador real) en cuanto el partido se juega, o el marcador EN VIVO
     si está en curso."""
     chip = chip_confianza(rec["confianza"])
+    hora = _hora_mx(live, rec["local"], rec["visitante"])
+    hora_html = f"🕐 {hora} MX · " if hora else ""
     res = evaluar(con, rec, fecha)
     score = _resultado_partido(con, rec["local"], rec["visitante"], fecha)
     vivo = (live or {}).get("vivo", {}).get((rec["local"], rec["visitante"]))
@@ -201,7 +215,7 @@ def render_pick(rec: dict, con, fecha: str, live: dict = None):
                 <span class='ap'>{rec['partido']} — {rec['apuesta']}</span>
                 <span class='pr'>{100*rec['prob']:.0f}%</span>
               </div>
-              <div class='pago'>pago ×{rec['pago']} &nbsp; {chip} &nbsp; {badge} {score_txt}</div>
+              <div class='pago'>{hora_html}pago ×{rec['pago']} &nbsp; {chip} &nbsp; {badge} {score_txt}</div>
               <div class='mt'>↳ {rec['motivo']}</div>
             </div>""",
         unsafe_allow_html=True,
@@ -224,14 +238,16 @@ def barra_1x2(loc, vis, p):
     )
 
 
-def render_tarjeta_partido(con, modelo, cfg, row):
+def render_tarjeta_partido(con, modelo, cfg, row, live: dict = None):
     loc, vis = row["local"], row["visitante"]
     pred = predecir(con, modelo, cfg, loc, vis, row["neutral"])
     conf = pred["confianza"]
     sede = "campo neutral" if pred["neutral"] else "con localía"
+    hora = _hora_mx(live, loc, vis)
+    hora_txt = f"🕐 {hora} hrs MX · " if hora else ""
     with st.container(border=True):
         st.markdown(f"#### {loc} 🆚 {vis}")
-        st.caption(f"{row['ciudad']} · {sede} · "
+        st.caption(f"{hora_txt}{row['ciudad']} · {sede} · "
                    f"{EMOJI_CONF[conf['nivel']]} confianza {conf['nivel']} "
                    f"({loc} {conf['n_local']} part., {vis} {conf['n_visit']} part.)")
         barra_1x2(loc, vis, pred["1x2"])
@@ -423,6 +439,10 @@ def main():
             st.info("No hay partidos del Mundial 2026 en esta fecha.")
         else:
             leyes = generar(con, modelo, cfg, fecha)
+            # Ordenar los picks por HORARIO del partido (los más temprano primero)
+            for tier in ("segura", "arriesgada", "sonador"):
+                leyes[tier].sort(
+                    key=lambda r: _hora_orden(live, r["local"], r["visitante"]))
             st.subheader(f"Partidos del {fecha} · {len(partidos)} encuentros")
 
             # 🎟️ Boleto del día: combinada de los más seguros, con resultado en vivo
@@ -462,10 +482,13 @@ def main():
         if not partidos:
             st.info("No hay partidos del Mundial 2026 en esta fecha.")
         else:
+            # Ordenar los partidos por horario (los más temprano primero)
+            partidos_ord = sorted(
+                partidos, key=lambda r: _hora_orden(live, r["local"], r["visitante"]))
             cols = st.columns(2)
-            for k, row in enumerate(partidos):
+            for k, row in enumerate(partidos_ord):
                 with cols[k % 2]:
-                    render_tarjeta_partido(con, modelo, cfg, row)
+                    render_tarjeta_partido(con, modelo, cfg, row, live)
 
     # --- TAB 3: histórico de aciertos (bajo demanda, para no frenar la carga) ---
     with tab3:

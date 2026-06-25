@@ -17,10 +17,25 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import datetime, timedelta, timezone
 
 import requests
 
 from . import db
+
+# México centro = UTC-6 todo el año (el país abolió el horario de verano en 2022).
+TZ_MX = timezone(timedelta(hours=-6))
+
+
+def hora_mexico(iso_utc: str) -> str:
+    """Convierte una fecha-hora ISO en UTC (de ESPN) a 'HH:MM' hora centro de México."""
+    if not iso_utc:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_utc.replace("Z", "+00:00"))
+        return dt.astimezone(TZ_MX).strftime("%H:%M")
+    except ValueError:
+        return ""
 
 ESPN_URL = ("https://site.api.espn.com/apis/site/v2/sports/soccer/"
             "fifa.world/scoreboard?dates={fecha}")
@@ -72,6 +87,7 @@ def obtener_marcadores(fecha_iso: str) -> list[dict]:
                 "equipos": equipos,
                 "completed": bool(tipo.get("completed")),
                 "estado": tipo.get("description", ""),
+                "fecha_hora": ev.get("date", ""),  # ISO en UTC
             })
     return partidos
 
@@ -96,6 +112,7 @@ def aplicar(con, fecha_iso: str) -> dict:
 
     finales = 0
     vivo: dict = {}
+    horarios: dict = {}
     for row in db_rows:
         local, visit = row["local"], row["visitante"]
         nl, nv = _norm(local), _norm(visit)
@@ -104,6 +121,9 @@ def aplicar(con, fecha_iso: str) -> dict:
             en1, en2 = _norm(n1), _norm(n2)
             if {en1, en2} != {nl, nv}:
                 continue
+            # Hora del partido (ISO UTC para ordenar + 'HH:MM' México para mostrar)
+            horarios[(local, visit)] = {
+                "utc": e["fecha_hora"], "mx": hora_mexico(e["fecha_hora"])}
             # Asignar el marcador a NUESTRO orden local/visitante por nombre
             gl = g1 if en1 == nl else g2
             gv = g1 if en1 == nv else g2
@@ -117,4 +137,4 @@ def aplicar(con, fecha_iso: str) -> dict:
                 vivo[(local, visit)] = {"gl": gl, "gv": gv, "estado": e["estado"]}
             break
     con.commit()
-    return {"finales": finales, "vivo": vivo}
+    return {"finales": finales, "vivo": vivo, "horarios": horarios}
