@@ -69,6 +69,11 @@ CSS = """
   .casino-hd .t { font-size:1.5rem; font-weight:900; letter-spacing:.5px; }
   .neon { color:#22c55e; text-shadow:0 0 8px rgba(34,197,94,.6); }
   .gold { color:#f5c542; text-shadow:0 0 8px rgba(245,197,66,.45); }
+  .multi { margin:10px 2px 2px; padding:10px 14px; border-radius:10px;
+           background:rgba(245,197,66,.10); border:1px solid rgba(245,197,66,.35);
+           display:flex; justify-content:space-between; align-items:center;
+           font-size:.92rem; }
+  .multi .x { font-size:1.5rem; font-weight:900; }
   .pago   { font-size:.85rem; opacity:.8; }
   .barra  { display:flex; height: 26px; border-radius: 7px; overflow:hidden;
             font-size:.72rem; font-weight:700; color:#0b0b0b; }
@@ -184,6 +189,24 @@ def _hora_mx(live: dict, local: str, visit: str):
     """Hora del partido 'HH:MM' en hora centro de México, o None si no se conoce."""
     h = (live or {}).get("horarios", {}).get((local, visit))
     return h["mx"] if h and h.get("mx") else None
+
+
+def render_multiplicador(picks: list):
+    """Pie de cada parlay: multiplicador combinado (producto de todas las cuotas)
+    y probabilidad combinada, como si se jugaran todos los picks en un solo boleto."""
+    if len(picks) < 2:
+        return
+    cuota = prob = 1.0
+    for r in picks:
+        cuota *= r["pago"]
+        prob *= r["prob"]
+    cuota_txt = f"×{cuota:,.0f}" if cuota >= 1000 else f"×{cuota:.2f}"
+    prob_txt = f"{100*prob:.1f}%" if prob >= 0.001 else f"{100*prob:.4f}%"
+    st.markdown(
+        f"<div class='multi'><span>🧮 Si juegas las <b>{len(picks)}</b> juntas "
+        f"(probabilidad combinada {prob_txt})</span>"
+        f"<span class='x gold'>{cuota_txt}</span></div>",
+        unsafe_allow_html=True)
 
 
 def render_pick(rec: dict, con, fecha: str, live: dict = None):
@@ -456,6 +479,7 @@ def main():
             if leyes["segura"]:
                 for r in leyes["segura"]:
                     render_pick(r, con, fecha, live)
+                render_multiplicador(leyes["segura"])
             else:
                 st.caption("Hoy ningún partido alcanza el umbral de seguridad.")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -466,6 +490,7 @@ def main():
             if leyes["arriesgada"]:
                 for r in leyes["arriesgada"]:
                     render_pick(r, con, fecha, live)
+                render_multiplicador(leyes["arriesgada"])
             else:
                 st.caption("Sin candidatos en la banda media hoy.")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -475,6 +500,7 @@ def main():
             st.markdown("### 🚀 Parlay Soñador  ·  baja probabilidad, alto valor")
             for r in leyes["sonador"]:
                 render_pick(r, con, fecha, live)
+            render_multiplicador(leyes["sonador"])
             st.markdown("</div>", unsafe_allow_html=True)
 
     # --- TAB 2: detalle por partido ---
