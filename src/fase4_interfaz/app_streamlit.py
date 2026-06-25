@@ -289,15 +289,12 @@ def render_ticket(p: dict, mostrar_fecha: bool = True):
     """Dibuja UN boleto de combinada estilo casino, con su resultado en vivo:
     GANADO / PERDIDO / EN JUEGO / ANULADO, y cada pata con ✅/❌/⏳."""
     legs = p["legs"]
-    pendiente = all(l["ok"] is None for l in legs)
     if p["acerto"] is True:
         clase, bcls, badge, extra = "won", "b-won", "GANADO ✅", f"+{p['pago']-1:.2f} fichas"
     elif p["acerto"] is False:
         clase, bcls, badge, extra = "lost", "b-lost", "PERDIDO ❌", "-1.00 fichas"
-    elif pendiente:
-        clase, bcls, badge, extra = "void", "b-void", "EN JUEGO ⏳", f"cuota ×{p['pago']}"
     else:
-        clase, bcls, badge, extra = "void", "b-void", "ANULADO ➖", "sin contar"
+        clase, bcls, badge, extra = "void", "b-void", "EN JUEGO ⏳", f"cuota ×{p['pago']}"
     legs_html = ""
     for leg in legs:
         marca = "✅" if leg["ok"] is True else ("❌" if leg["ok"] is False else "⏳")
@@ -339,11 +336,26 @@ def render_parlays(hist: dict):
     c3.metric("Días jugados", f"{jug}")
 
     st.caption("Cada día se arma un boleto con los picks más seguros. Gana solo si "
-               "**todas** las patas pegan, como en una combinada real.")
+               "**todas** las patas pegan, como una combinada real. Pícale a un "
+               "boleto para ver sus patas.")
 
-    # Boletos, del más reciente al más antiguo
-    for p in reversed(parlays):
-        render_ticket(p, mostrar_fecha=True)
+    # Boletos compactos: cada uno se despliega al hacer clic (el más reciente abierto)
+    for i, p in enumerate(reversed(parlays)):
+        ok = p["acerto"]
+        estado = ("✅ GANADO" if ok is True else "❌ PERDIDO" if ok is False
+                  else "⏳ EN JUEGO")
+        with st.expander(f"📅 {p['fecha']}   ·   {estado}   ·   cuota ×{p['pago']}",
+                         expanded=(i == 0)):
+            legs_html = ""
+            for leg in p["legs"]:
+                marca = "✅" if leg["ok"] is True else ("❌" if leg["ok"] is False else "⏳")
+                legs_html += f"<div class='tk-leg'>{marca} {leg['texto']}</div>"
+            extra = (f"+{p['pago']-1:.2f} fichas" if ok is True else
+                     "-1.00 fichas" if ok is False else "sin cerrar todavía")
+            st.markdown(
+                f"<div class='ticket'>{legs_html}<div class='tk-foot'>"
+                f"<span>cuota combinada ×{p['pago']}</span><span>{extra}</span></div></div>",
+                unsafe_allow_html=True)
 
 
 # --- App --------------------------------------------------------------------
@@ -370,8 +382,17 @@ def main():
 
     # Sidebar
     st.sidebar.header("Jornada")
-    idx = fechas.index(hoy) if hoy in fechas else 0
-    fecha = st.sidebar.selectbox("Elige la fecha", fechas, index=idx)
+    # Recordar la fecha elegida entre refrescos (se guarda en la URL), para que NO
+    # se "salte de día" al recargar la página.
+    fecha_url = st.query_params.get("fecha")
+    if fecha_url in fechas:
+        idx = fechas.index(fecha_url)
+    elif hoy in fechas:
+        idx = fechas.index(hoy)
+    else:
+        idx = len(fechas) - 1
+    fecha = st.sidebar.selectbox("Elige la fecha", fechas, index=idx, key="sel_fecha")
+    st.query_params["fecha"] = fecha
     st.sidebar.caption(f"📅 Datos actualizados al {version}")
     if st.sidebar.button("🔄 Forzar actualización ahora"):
         from src.fase1_datos.actualizar_diario import actualizar
@@ -384,8 +405,8 @@ def main():
         st.rerun()
     st.sidebar.markdown("---")
     st.sidebar.markdown(
-        "**Leyenda**\n\n🔒 Segura · alta prob.\n\n"
-        "⚖️ Arriesgada · prob. media\n\n🚀 Soñador · alto riesgo")
+        "**Leyenda**\n\n🔒 Parlay Seguro · alta prob.\n\n"
+        "⚖️ Parlay Arriesgado · prob. media\n\n🚀 Parlay Soñador · alto riesgo")
 
     modelo, cfg = cargar_modelo_y_cfg(version)
     # Marcadores en vivo/finales de ESPN para la fecha elegida (rellena terminados).
@@ -411,7 +432,7 @@ def main():
 
             st.markdown("<div class='bloque' style='background:rgba(34,197,94,.10)'>",
                         unsafe_allow_html=True)
-            st.markdown("### 🔒 Ley Segura  ·  alta probabilidad, bajo riesgo")
+            st.markdown("### 🔒 Parlay Seguro  ·  alta probabilidad, bajo riesgo")
             if leyes["segura"]:
                 for r in leyes["segura"]:
                     render_pick(r, con, fecha, live)
@@ -421,7 +442,7 @@ def main():
 
             st.markdown("<div class='bloque' style='background:rgba(245,158,11,.10)'>",
                         unsafe_allow_html=True)
-            st.markdown("### ⚖️ Ley Arriesgada  ·  probabilidad media, mejor pago")
+            st.markdown("### ⚖️ Parlay Arriesgado  ·  probabilidad media, mejor pago")
             if leyes["arriesgada"]:
                 for r in leyes["arriesgada"]:
                     render_pick(r, con, fecha, live)
@@ -431,7 +452,7 @@ def main():
 
             st.markdown("<div class='bloque' style='background:rgba(239,68,68,.10)'>",
                         unsafe_allow_html=True)
-            st.markdown("### 🚀 Ley Soñador  ·  baja probabilidad, alto valor")
+            st.markdown("### 🚀 Parlay Soñador  ·  baja probabilidad, alto valor")
             for r in leyes["sonador"]:
                 render_pick(r, con, fecha, live)
             st.markdown("</div>", unsafe_allow_html=True)
@@ -457,7 +478,7 @@ def main():
             st.session_state["calc_hist"] = True
             st.rerun()
         else:
-            st.info("Pulsa el botón para ver cómo ha acertado cada Ley en las "
+            st.info("Pulsa el botón para ver cómo ha acertado cada parlay en las "
                     "jornadas ya jugadas. (Tarda unos segundos: entrena el modelo "
                     "en cada fecha pasada.)")
 
