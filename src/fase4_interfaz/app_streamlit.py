@@ -290,6 +290,32 @@ def render_tarjeta_partido(con, modelo, cfg, row, live: dict = None):
                     f"sin goles {100*fa['sin_goles']:.0f}%")
 
 
+def render_parlay_expander(titulo: str, picks: list, con, fecha: str, live: dict):
+    """Un parlay como DESPLEGABLE: el título resume (nº de patas, multiplicador y
+    si pegó), y al hacer clic se abren todos los picks que lleva, ordenados por
+    horario, más el multiplicador combinado."""
+    if not picks:
+        return
+    # Multiplicador combinado (producto de las cuotas)
+    cuota = 1.0
+    for r in picks:
+        cuota *= r["pago"]
+    cuota_txt = f"×{cuota:,.0f}" if cuota >= 1000 else f"×{cuota:.2f}"
+    # Estado de la combinada (pega solo si TODAS las patas pegan)
+    oks = [evaluar(con, r, fecha) for r in picks]
+    if oks and all(o is not None for o in oks):
+        estado = "✅ PEGÓ" if all(oks) else "❌ NO PEGÓ"
+    else:
+        estado = "⏳ EN JUEGO"
+    label = f"{titulo}  ·  {len(picks)} patas  ·  {cuota_txt}  ·  {estado}"
+    with st.expander(label, expanded=False):
+        picks_ord = sorted(
+            picks, key=lambda r: _hora_orden(live, r["local"], r["visitante"]))
+        for r in picks_ord:
+            render_pick(r, con, fecha, live)
+        render_multiplicador(picks)
+
+
 def render_historico(version: str):
     """Calcula y dibuja el histórico de aciertos (entrena el modelo por jornada)."""
     hist = cargar_historico(version)
@@ -298,10 +324,10 @@ def render_historico(version: str):
         return
     tot = hist["totales"]
     combo = hist.get("combinada_totales", {})
-    etiquetas = {"segura": "🔒 Parlay Seguro", "arriesgada": "⚖️ Parlay Arriesgado",
+    etiquetas = {"segura": "🔒 Parlay Seguro", "arriesgada": "⚖️ Parlay Intermedio",
                  "sonador": "🚀 Parlay Soñador"}
-    st.markdown("**Combinada completa** = el parlay del día pega solo si **todas** "
-                "sus patas pegan juntas (como un boleto real).")
+    st.markdown("**Combinada completa** = el parlay corto (3 patas) pega solo si "
+                "**todas** sus patas pegan juntas (como un boleto real).")
     cols = st.columns(3)
     for col, tier in zip(cols, ("segura", "arriesgada", "sonador")):
         pg, pj = combo.get(tier, [0, 0])
@@ -453,7 +479,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown(
         "**Leyenda**\n\n🔒 Parlay Seguro · alta prob.\n\n"
-        "⚖️ Parlay Arriesgado · prob. media\n\n🚀 Parlay Soñador · alto riesgo")
+        "⚖️ Parlay Intermedio · prob. media\n\n🚀 Parlay Soñador · alto riesgo")
 
     modelo, cfg = cargar_modelo_y_cfg(version)
     # Marcadores en vivo/finales de ESPN para la fecha elegida (rellena terminados).
@@ -470,46 +496,21 @@ def main():
             st.info("No hay partidos del Mundial 2026 en esta fecha.")
         else:
             leyes = generar(con, modelo, cfg, fecha)
-            # Ordenar los picks por HORARIO del partido (los más temprano primero)
-            for tier in ("segura", "arriesgada", "sonador"):
-                leyes[tier].sort(
-                    key=lambda r: _hora_orden(live, r["local"], r["visitante"]))
+            N = cfg["leyes"].get("max_picks", 3)
             st.subheader(f"Partidos del {fecha} · {len(partidos)} encuentros")
+            st.caption("Pícale a un parlay para desplegar los picks que lleva. "
+                       "**Cortos** = las 3 mejores apuestas · **Largos** = todos los "
+                       "juegos del día.")
 
-            # 🎟️ Boleto del día: combinada de los más seguros, con resultado en vivo
-            parlay_dia = _evaluar_parlay(con, leyes["segura"], fecha)
-            if parlay_dia:
-                render_ticket(parlay_dia, mostrar_fecha=False)
+            st.markdown("##### 🎟️ Parlays cortos (las 3 mejores)")
+            render_parlay_expander("🔒 Seguro", leyes["segura"][:N], con, fecha, live)
+            render_parlay_expander("⚖️ Intermedio", leyes["arriesgada"][:N], con, fecha, live)
+            render_parlay_expander("🚀 Soñador", leyes["sonador"][:N], con, fecha, live)
 
-            st.markdown("<div class='bloque' style='background:rgba(34,197,94,.10)'>",
-                        unsafe_allow_html=True)
-            st.markdown("### 🔒 Parlay Seguro  ·  alta probabilidad, bajo riesgo")
-            if leyes["segura"]:
-                for r in leyes["segura"]:
-                    render_pick(r, con, fecha, live)
-                render_multiplicador(leyes["segura"])
-            else:
-                st.caption("Hoy ningún partido alcanza el umbral de seguridad.")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            st.markdown("<div class='bloque' style='background:rgba(245,158,11,.10)'>",
-                        unsafe_allow_html=True)
-            st.markdown("### ⚖️ Parlay Arriesgado  ·  probabilidad media, mejor pago")
-            if leyes["arriesgada"]:
-                for r in leyes["arriesgada"]:
-                    render_pick(r, con, fecha, live)
-                render_multiplicador(leyes["arriesgada"])
-            else:
-                st.caption("Sin candidatos en la banda media hoy.")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            st.markdown("<div class='bloque' style='background:rgba(239,68,68,.10)'>",
-                        unsafe_allow_html=True)
-            st.markdown("### 🚀 Parlay Soñador  ·  baja probabilidad, alto valor")
-            for r in leyes["sonador"]:
-                render_pick(r, con, fecha, live)
-            render_multiplicador(leyes["sonador"])
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("##### 🧱 Parlays largos (todos los juegos del día)")
+            render_parlay_expander("🔒 Seguro largo", leyes["segura"], con, fecha, live)
+            render_parlay_expander("⚖️ Intermedio largo", leyes["arriesgada"], con, fecha, live)
+            render_parlay_expander("🚀 Soñador largo", leyes["sonador"], con, fecha, live)
 
     # --- TAB 2: detalle por partido ---
     with tab2:

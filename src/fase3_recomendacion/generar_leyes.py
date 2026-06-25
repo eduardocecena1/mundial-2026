@@ -137,12 +137,11 @@ def generar(con, modelo, cfg: dict, fecha: str) -> dict:
             "motivo": f"el marcador más probable según el modelo ({100*pr:.0f}%)",
         })
 
-    # Ordenar por probabilidad (las más fiables primero) y quedarnos con las N
-    # mejores patas por parlay (un boleto de 3 patas es más realista que de 6).
-    max_picks = leyes_cfg.get("max_picks", 3)
-    segura = sorted(segura, key=lambda r: r["prob"], reverse=True)[:max_picks]
-    arriesgada = sorted(arriesgada, key=lambda r: r["prob"], reverse=True)[:max_picks]
-    sonador = sorted(sonador, key=lambda r: r["prob"], reverse=True)[:max_picks]
+    # Ordenar por probabilidad (las más fiables primero). NO se truncan aquí:
+    # el "parlay corto" toma las 3 mejores y el "largo" usa todas (todos los juegos).
+    segura = sorted(segura, key=lambda r: r["prob"], reverse=True)
+    arriesgada = sorted(arriesgada, key=lambda r: r["prob"], reverse=True)
+    sonador = sorted(sonador, key=lambda r: r["prob"], reverse=True)
 
     # --- Combinada soñadora: parlay de los 3 picks más seguros del día ---
     parlay = None
