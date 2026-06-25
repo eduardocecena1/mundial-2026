@@ -496,10 +496,19 @@ def main():
 def cuerpo(version: str, fecha: str):
     """Cuerpo de la app. Se AUTO-REFRESCA cada 60 s gracias a st.fragment, así los
     partidos que van terminando muestran su resultado solos, sin recargar."""
+    from datetime import datetime as _dt
     modelo, cfg = cargar_modelo_y_cfg(version)
-    # Marcadores en vivo/finales de ESPN para la fecha elegida (rellena terminados).
-    live = marcadores_live(fecha, version)
     con = db.conectar()
+    # Marcadores en vivo/finales de ESPN, consultados DIRECTO en cada refresco
+    # (este bloque se re-ejecuta solo cada ~60 s) para que los partidos que van
+    # terminando se actualicen sin recargar la página.
+    live = mv.aplicar(con, fecha)
+    cc1, cc2 = st.columns([4, 1])
+    cc1.caption(f"🔴 EN VIVO · última consulta de marcadores: "
+                f"**{_dt.now(mv.TZ_MX).strftime('%H:%M:%S')}** hrs MX "
+                f"(se actualiza solo cada ~60 s)")
+    if cc2.button("🔄 Refrescar ya", key="refresh_live"):
+        st.rerun()
     partidos = db.calendario_de_fecha(con, fecha)
 
     tab1, tab2, tab3 = st.tabs(["🎯 Picks del día", "📊 Detalle por partido",
