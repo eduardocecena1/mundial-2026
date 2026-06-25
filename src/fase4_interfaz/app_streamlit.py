@@ -297,27 +297,35 @@ def render_historico(version: str):
         st.info("Aún no hay jornadas jugadas para evaluar.")
         return
     tot = hist["totales"]
-    etiquetas = {"segura": "🔒 Segura", "arriesgada": "⚖️ Arriesgada",
-                 "sonador": "🚀 Soñador"}
+    combo = hist.get("combinada_totales", {})
+    etiquetas = {"segura": "🔒 Parlay Seguro", "arriesgada": "⚖️ Parlay Arriesgado",
+                 "sonador": "🚀 Parlay Soñador"}
+    st.markdown("**Combinada completa** = el parlay del día pega solo si **todas** "
+                "sus patas pegan juntas (como un boleto real).")
     cols = st.columns(3)
     for col, tier in zip(cols, ("segura", "arriesgada", "sonador")):
+        pg, pj = combo.get(tier, [0, 0])
         a, t = tot[tier]
-        pct = (100 * a / t) if t else 0
-        col.metric(etiquetas[tier], f"{pct:.0f}% aciertos", f"{a}/{t}")
+        pct = (100 * pg / pj) if pj else 0
+        col.metric(etiquetas[tier], f"{pg}/{pj} días",
+                   f"{pct:.0f}% pegó la combinada completa")
+        col.caption(f"picks sueltos: {a}/{t} ({100*a/t:.0f}%)" if t else "—")
 
+    # Gráfico: % de picks sueltos que pegaron por jornada
     filas = []
     for f in hist["fechas"]:
         for tier in ("segura", "arriesgada", "sonador"):
             a, t = f[tier]
             if t:
-                filas.append({"fecha": f["fecha"], "Ley": etiquetas[tier],
+                filas.append({"fecha": f["fecha"], "Parlay": etiquetas[tier],
                               "acierto_%": 100 * a / t})
     df = pd.DataFrame(filas)
     if not df.empty:
+        st.caption("Gráfico: % de picks sueltos acertados por jornada.")
         chart = (alt.Chart(df).mark_line(point=True)
                  .encode(x="fecha:N", y=alt.Y("acierto_%:Q",
                                               scale=alt.Scale(domain=[0, 100])),
-                         color="Ley:N", tooltip=["fecha", "Ley", "acierto_%"])
+                         color="Parlay:N", tooltip=["fecha", "Parlay", "acierto_%"])
                  .properties(height=320))
         st.altair_chart(chart, use_container_width=True)
 

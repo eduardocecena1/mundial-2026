@@ -96,7 +96,8 @@ def evaluar_rango(con, cfg, desde="2026-06-01", hasta="2026-12-31") -> dict:
     }
     """
     fechas = _fechas_jugadas(con, desde, hasta)
-    tot = {"segura": [0, 0], "arriesgada": [0, 0], "sonador": [0, 0]}
+    tot = {"segura": [0, 0], "arriesgada": [0, 0], "sonador": [0, 0]}        # picks sueltos
+    combo = {"segura": [0, 0], "arriesgada": [0, 0], "sonador": [0, 0]}      # combinada completa
     por_fecha = []
     parlays = []
 
@@ -106,36 +107,41 @@ def evaluar_rango(con, cfg, desde="2026-06-01", hasta="2026-12-31") -> dict:
         leyes = generar(con, modelo, cfg, fecha)
         fila = {"fecha": fecha}
         for tier in ("segura", "arriesgada", "sonador"):
-            a = t = 0
-            for rec in leyes[tier]:
-                ok = evaluar(con, rec, fecha)
-                if ok is None:
-                    continue
-                t += 1
-                a += 1 if ok else 0
+            oks = [evaluar(con, rec, fecha) for rec in leyes[tier]]
+            # Aciertos de picks SUELTOS (para el gráfico de % por jornada)
+            a = sum(1 for o in oks if o is True)
+            t = sum(1 for o in oks if o is not None)
             tot[tier][0] += a
             tot[tier][1] += t
             fila[tier] = [a, t]
+            # COMBINADA COMPLETA: el parlay del día pega solo si TODAS las patas
+            # pegan. Solo cuenta cuando todas son evaluables (partidos terminados).
+            if oks and all(o is not None for o in oks):
+                gano = all(oks)
+                combo[tier][0] += 1 if gano else 0
+                combo[tier][1] += 1
+                fila[tier + "_combo"] = 1 if gano else 0
+            else:
+                fila[tier + "_combo"] = None
 
-        # Combinada (parlay) del día: los picks más seguros, como en la app.
-        # Gana SOLO si todas las patas pegan (igual que un boleto real).
+        # Boleto visual de la combinada SEGURA del día (todas sus patas).
         p = _evaluar_parlay(con, leyes["segura"], fecha)
         fila["parlay"] = p
         if p:
             parlays.append(p)
         por_fecha.append(fila)
 
-    return {"fechas": por_fecha, "totales": tot,
+    return {"fechas": por_fecha, "totales": tot, "combinada_totales": combo,
             "parlays": parlays, "parlay_totales": _resumen_parlays(parlays)}
 
 
 def _evaluar_parlay(con, segura, fecha):
-    """Construye y evalúa la combinada del día (hasta 3 picks más seguros).
-    Devuelve None si no hay al menos 2 picks. 'acerto' es True/False, o None si
-    alguna pata no se pudo evaluar (boleto anulado)."""
+    """Construye y evalúa la combinada del día con TODOS los picks del parlay.
+    Gana solo si TODAS las patas pegan. Devuelve None si no hay al menos 2 picks.
+    'acerto' es True/False, o None si alguna pata no se pudo evaluar (pendiente)."""
     if len(segura) < 2:
         return None
-    legs_src = segura[:3]
+    legs_src = segura
     legs = []
     oks = []
     prob = 1.0
@@ -192,8 +198,11 @@ def correr(con, cfg, desde="2026-06-01", hasta="2026-12-31"):
     etiquetas = {"segura": "🔒 Segura", "arriesgada": "⚖️  Arriesgada", "sonador": "🚀 Soñador"}
     for tier in ("segura", "arriesgada", "sonador"):
         a, t = datos["totales"][tier]
+        pg, pj = datos["combinada_totales"][tier]
         pct = f"{100*a/t:.0f}%" if t else "s/d"
-        print(f"  {etiquetas[tier]:16s}: {a}/{t} aciertos  ({pct})")
+        pctc = f"{100*pg/pj:.0f}%" if pj else "s/d"
+        print(f"  {etiquetas[tier]:16s}: combinada completa {pg}/{pj} ({pctc})  "
+              f"|  picks sueltos {a}/{t} ({pct})")
 
 
 def main():
