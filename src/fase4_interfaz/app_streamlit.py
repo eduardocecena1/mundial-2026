@@ -486,29 +486,28 @@ def main():
         "**Leyenda**\n\n🔒 Parlay Seguro · alta prob.\n\n"
         "⚖️ Parlay Intermedio · prob. media\n\n🚀 Parlay Soñador · alto riesgo")
 
-    st.sidebar.caption("🔴 EN VIVO · la app se actualiza sola cada ~60 s")
+    st.sidebar.caption("🔴 Marcadores en vivo · pulsa 🔄 Refrescar o recarga la página")
 
-    # Cuerpo auto-refrescable (marcadores en vivo sin recargar la página).
     cuerpo(version, fecha)
 
 
-@st.fragment(run_every=60)
 def cuerpo(version: str, fecha: str):
-    """Cuerpo de la app. Se AUTO-REFRESCA cada 60 s gracias a st.fragment, así los
-    partidos que van terminando muestran su resultado solos, sin recargar."""
+    """Cuerpo de la app. Los marcadores en vivo se refrescan al RECARGAR la página
+    o al pulsar '🔄 Refrescar ya' (el auto-refresco automático se desactivó para
+    mantener la app estable en el plan gratis)."""
     from datetime import datetime as _dt
     modelo, cfg = cargar_modelo_y_cfg(version)
     con = db.conectar()
-    # Marcadores en vivo/finales de ESPN, consultados DIRECTO en cada refresco
-    # (este bloque se re-ejecuta solo cada ~60 s) para que los partidos que van
-    # terminando se actualicen sin recargar la página.
-    live = mv.aplicar(con, fecha)
+    # Marcadores en vivo/finales de ESPN para la fecha (rellena los terminados).
+    # Si ESPN falla, mv.aplicar degrada solo y la app sigue con lo de martj42.
+    try:
+        live = mv.aplicar(con, fecha)
+    except Exception:
+        live = {"finales": 0, "vivo": {}, "horarios": {}}
     cc1, cc2 = st.columns([4, 1])
-    cc1.caption(f"🔴 EN VIVO · última consulta de marcadores: "
-                f"**{_dt.now(mv.TZ_MX).strftime('%H:%M:%S')}** hrs MX "
-                f"(se actualiza solo cada ~60 s)")
-    if cc2.button("🔄 Refrescar ya", key="refresh_live"):
-        st.rerun()
+    cc1.caption(f"🔴 Marcadores al **{_dt.now(mv.TZ_MX).strftime('%H:%M:%S')}** hrs MX "
+                f"· pulsa 🔄 o recarga para traer los más nuevos")
+    cc2.button("🔄 Refrescar ya", key="refresh_live")
     partidos = db.calendario_de_fecha(con, fecha)
 
     tab1, tab2, tab3 = st.tabs(["🎯 Picks del día", "📊 Detalle por partido",
