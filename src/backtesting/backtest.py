@@ -1,8 +1,8 @@
 """
-backtest.py — Validación honesta del modelo contra torneos pasados.
+backtest.py — Validación honesta del modelo contra competiciones pasadas.
 
-Entrena el modelo SOLO con datos anteriores al torneo objetivo (sin filtrar el
-futuro) y predice cada partido del torneo, comparando con el resultado real.
+Entrena el modelo SOLO con datos anteriores a la ventana objetivo (sin filtrar el
+futuro) y predice cada partido de esa ventana, comparando con el resultado real.
 
 Métricas (cuanto MÁS BAJO mejor, salvo accuracy):
   - accuracy 1X2  : % de aciertos del resultado más probable (argmax).
@@ -16,8 +16,9 @@ Compara contra una LÍNEA BASE (las frecuencias históricas locales/empate/visit
 para demostrar que el modelo aporta valor real y no solo "adivina la media".
 
 Uso:
-    python -m src.backtesting.backtest                 # backtest por defecto (varios torneos)
+    python -m src.backtesting.backtest                 # backtest por defecto (varios eventos)
     python -m src.backtesting.backtest --tune          # + búsqueda de hiperparámetros
+    python -m src.backtesting.backtest --rapido        # solo los eventos de Champions
 """
 
 from __future__ import annotations
@@ -27,18 +28,28 @@ import math
 
 import numpy as np
 
+from ..config import cargar_config, liga_de_competicion
 from ..fase1_datos import db
 from ..fase2_modelo import mercados
-from ..fase2_modelo.entrenar import cargar_config, entrenar_modelo
+from ..fase2_modelo.entrenar import entrenar_modelo
 
 
-# Torneos a validar: (etiqueta, nombre_en_datos, desde, hasta)
-TORNEOS_DEFECTO = [
-    ("Mundial 2018", "FIFA World Cup", "2018-06-01", "2018-07-31"),
-    ("Mundial 2022", "FIFA World Cup", "2022-11-01", "2022-12-31"),
-    ("Eurocopa 2021", "UEFA Euro", "2021-06-01", "2021-07-31"),
-    ("Eurocopa 2024", "UEFA Euro", "2024-06-01", "2024-07-31"),
+# Eventos a validar: (etiqueta, slug de competición, desde, hasta).
+# Se valida sobre Champions (que es la competición objetivo) y sobre una
+# temporada completa de Premier, que aporta volumen para que las métricas no
+# dependan de la varianza altísima de una eliminatoria.
+EVENTOS_DEFECTO = [
+    ("UCL 2023-24 fase grupos", "uefa.champions", "2023-09-01", "2023-12-31"),
+    ("UCL 2023-24 eliminatorias", "uefa.champions", "2024-02-01", "2024-06-30"),
+    ("UCL 2024-25 fase liga", "uefa.champions", "2024-09-01", "2025-01-31"),
+    ("UCL 2024-25 eliminatorias", "uefa.champions", "2025-02-01", "2025-06-30"),
+    ("UCL 2025-26 fase liga", "uefa.champions", "2025-09-01", "2026-01-31"),
+    ("UCL 2025-26 eliminatorias", "uefa.champions", "2026-02-01", "2026-06-30"),
+    ("Premier 2025-26", "eng.1", "2025-08-01", "2026-05-31"),
 ]
+
+# Subconjunto para iterar rápido durante el tuning.
+EVENTOS_RAPIDOS = [e for e in EVENTOS_DEFECTO if e[1] == "uefa.champions"]
 
 
 def _rps_1x2(probs: list, resultado: int) -> float:
@@ -55,15 +66,14 @@ def _rps_1x2(probs: list, resultado: int) -> float:
     return s / 2.0
 
 
-def backtest_evento(con, cfg, nombre, torneo, desde, hasta, verbose=True):
-    """Backtest de un torneo. Devuelve dict de métricas."""
-    # Partidos jugados del torneo en la ventana de fechas
+def backtest_evento(con, cfg, nombre, comp, desde, hasta, verbose=True):
+    """Backtest de una competición en una ventana. Devuelve dict de métricas."""
     partidos = con.execute(
         """SELECT local, visitante, goles_local, goles_visitante, neutral
              FROM partidos
-            WHERE jugado=1 AND torneo=? AND fecha>=? AND fecha<=?
+            WHERE jugado=1 AND competicion=? AND fecha>=? AND fecha<=?
             ORDER BY fecha""",
-        (torneo, desde, hasta),
+        (comp, desde, hasta),
     ).fetchall()
     if not partidos:
         return None
@@ -81,6 +91,7 @@ def backtest_evento(con, cfg, nombre, torneo, desde, hasta, verbose=True):
         (desde,),
     ).fetchone()
     base_probs = [base["l"], base["e"], base["v"]]
+    liga_comp = liga_de_competicion(comp, cfg)
 
     n = 0
     aciertos = 0
@@ -93,7 +104,7 @@ def backtest_evento(con, cfg, nombre, torneo, desde, hasta, verbose=True):
         if loc not in modelo.idx or vis not in modelo.idx:
             saltados += 1
             continue
-        M = modelo.matriz_marcador(loc, vis, p["neutral"])
+        M = modelo.matriz_marcador(loc, vis, p["neutral"], liga_comp)
         x1 = mercados.resultado_1x2(M)
         probs = [x1["local"], x1["empate"], x1["visitante"]]
 
@@ -140,11 +151,11 @@ def backtest_evento(con, cfg, nombre, torneo, desde, hasta, verbose=True):
     return res
 
 
-def correr_backtest(con, cfg, torneos=None, verbose=True):
-    torneos = torneos or TORNEOS_DEFECTO
+def correr_backtest(con, cfg, eventos=None, verbose=True):
+    eventos = eventos or EVENTOS_DEFECTO
     resultados = []
-    for nombre, torneo, desde, hasta in torneos:
-        r = backtest_evento(con, cfg, nombre, torneo, desde, hasta, verbose)
+    for nombre, comp, desde, hasta in eventos:
+        r = backtest_evento(con, cfg, nombre, comp, desde, hasta, verbose)
         if r:
             resultados.append(r)
     if resultados and verbose:
@@ -161,23 +172,43 @@ def correr_backtest(con, cfg, torneos=None, verbose=True):
     return resultados
 
 
-def tune_hiperparametros(con, cfg):
-    """Busca (vida_media, reg) que minimicen el log-loss medio en backtest.
-    Esto es lo que vuelve el modelo lo MÁS PRECISO posible con estos datos."""
-    print("\nBúsqueda de hiperparámetros (esto entrena el modelo varias veces)...")
+def tune_hiperparametros(con, cfg, eventos=None, rejilla=None):
+    """Busca (vida_media, reg, reg_liga) que minimicen el log-loss medio.
+    Esto es lo que vuelve el modelo lo MÁS PRECISO posible con estos datos.
+
+    La rejilla es la de clubes: vidas medias mucho más cortas que en selecciones
+    (un club juega ~55 partidos al año, una selección ~10) y un barrido de
+    reg_liga, que controla cuánto se permite que las ligas difieran entre sí."""
+    rejilla = rejilla or {
+        "vida_media_anios": [0.5, 0.75, 1.0, 1.5, 2.0],
+        # El rango llega hasta 8: un recién ascendido con 3 partidos jugados se
+        # colaba en el top-2 global con reg=0.5, señal de que el valor heredado
+        # del modelo de selecciones encoge demasiado poco para clubes.
+        "reg": [0.5, 1.0, 2.0, 4.0, 8.0],
+        "reg_liga": [0.01, 0.05, 0.2],
+    }
+    print("\nBúsqueda de hiperparámetros (esto entrena el modelo muchas veces)...")
     mejor = None
-    for vm in [1.0, 1.5, 2.0, 3.0]:
-        for reg in [0.5, 1.0, 2.0, 4.0]:
-            cfg["modelo"]["vida_media_anios"] = vm
-            cfg["modelo"]["reg"] = reg
-            resultados = correr_backtest(con, cfg, verbose=False)
-            n_tot = sum(r["n"] for r in resultados)
-            ll = sum(r["logloss"] * r["n"] for r in resultados) / n_tot
-            rps = sum(r["rps"] * r["n"] for r in resultados) / n_tot
-            print(f"    vida_media={vm}  reg={reg}  ->  logloss={ll:.4f}  rps={rps:.4f}")
-            if mejor is None or ll < mejor[0]:
-                mejor = (ll, rps, vm, reg)
-    print(f"\n  MEJOR: vida_media={mejor[2]}  reg={mejor[3]}  "
+    for vm in rejilla["vida_media_anios"]:
+        for reg in rejilla["reg"]:
+            for rl in rejilla["reg_liga"]:
+                cfg["modelo"]["vida_media_anios"] = vm
+                cfg["modelo"]["reg"] = reg
+                cfg["modelo"]["reg_liga"] = rl
+                resultados = correr_backtest(con, cfg, eventos, verbose=False)
+                if not resultados:
+                    continue
+                n_tot = sum(r["n"] for r in resultados)
+                ll = sum(r["logloss"] * r["n"] for r in resultados) / n_tot
+                rps = sum(r["rps"] * r["n"] for r in resultados) / n_tot
+                print(f"    vida_media={vm:<5} reg={reg:<5} reg_liga={rl:<5} "
+                      f"->  logloss={ll:.4f}  rps={rps:.4f}")
+                if mejor is None or ll < mejor[0]:
+                    mejor = (ll, rps, vm, reg, rl)
+    if mejor is None:
+        print("  (sin resultados: ¿está descargado el histórico?)")
+        return None
+    print(f"\n  MEJOR: vida_media={mejor[2]}  reg={mejor[3]}  reg_liga={mejor[4]}  "
           f"(logloss={mejor[0]:.4f}, rps={mejor[1]:.4f})")
     print("  -> Considera fijar estos valores en config.yaml")
     return mejor
@@ -186,16 +217,19 @@ def tune_hiperparametros(con, cfg):
 def main():
     parser = argparse.ArgumentParser(description="Backtesting del modelo.")
     parser.add_argument("--tune", action="store_true",
-                        help="Buscar mejores hiperparámetros (más lento).")
+                        help="Buscar mejores hiperparámetros (mucho más lento).")
+    parser.add_argument("--rapido", action="store_true",
+                        help="Solo los eventos de Champions (itera antes).")
     args = parser.parse_args()
 
     con = db.conectar()
     cfg = cargar_config()
-    print("BACKTESTING — validando el modelo contra torneos pasados")
-    print("(se entrena solo con datos anteriores a cada torneo: sin trampa)")
-    correr_backtest(con, cfg)
+    eventos = EVENTOS_RAPIDOS if args.rapido else EVENTOS_DEFECTO
+    print("BACKTESTING — validando el modelo contra competiciones pasadas")
+    print("(se entrena solo con datos anteriores a cada ventana: sin trampa)")
+    correr_backtest(con, cfg, eventos)
     if args.tune:
-        tune_hiperparametros(con, cfg)
+        tune_hiperparametros(con, cfg, EVENTOS_RAPIDOS)
     con.close()
 
 

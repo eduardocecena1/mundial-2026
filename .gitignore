@@ -4,12 +4,17 @@
 # Entorno virtual
 .venv/
 
-# Datos descargados y base local
+# Datos descargados y cachés locales
 data/raw/
 data/processed/
 *.db
 *.db-wal
 *.db-shm
+
+# EXCEPCIÓN: la base de clubes SÍ se sube (13 MB). Reconstruirla desde ESPN tarda
+# 10-20 minutos, y Streamlit Cloud no aguanta eso en el arranque; con la base
+# versionada la app abre al instante y solo refresca la temporada en curso.
+!data/clubes.db
 
 # Python
 __pycache__/

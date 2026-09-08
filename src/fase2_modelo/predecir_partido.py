@@ -8,23 +8,31 @@ de confianza en un único objeto de predicción, listo para que la Fase 3
 
 from __future__ import annotations
 
+from ..config import liga_de_competicion
 from . import mercados
 from .confianza import confianza_partido
 
 
-def predecir(con, modelo, cfg: dict, local: str, visit: str, neutral: int = 1) -> dict:
+def predecir(con, modelo, cfg: dict, local: str, visit: str, neutral: int = 0,
+             competicion: str | None = None) -> dict:
     """Predicción completa de un enfrentamiento.
 
     Devuelve un dict con todos los mercados (probabilidades 0..1), los goles
     esperados y el nivel de confianza basado en datos disponibles.
+
+    `neutral` es 0 por defecto: en fútbol de clubes casi todo se juega con
+    localía real (solo la final de Champions es campo neutral). En el modelo
+    del Mundial el defecto era el contrario.
     """
     lineas = tuple(cfg["apuestas"]["lineas_goles"])
-    merc = mercados.todos_los_mercados(modelo, local, visit, neutral, lineas)
+    liga = liga_de_competicion(competicion, cfg) if competicion else None
+    merc = mercados.todos_los_mercados(modelo, local, visit, neutral, lineas, liga)
     conf = confianza_partido(con, local, visit, cfg)
     return {
         "local": local,
         "visitante": visit,
         "neutral": bool(neutral),
+        "competicion": competicion,
         "confianza": conf,
         **merc,
     }
