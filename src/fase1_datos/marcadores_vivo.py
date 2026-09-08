@@ -1,30 +1,33 @@
 """
 marcadores_vivo.py — Marcadores EN VIVO desde la API pública de ESPN (sin key).
 
-El dataset histórico (martj42) sube los resultados con retraso (a veces horas o
-un día después del partido). Para que los picks y boletos del día muestren el
-resultado real al instante, este módulo trae los marcadores en vivo/finales de
-ESPN y los aplica sobre la base:
+La descarga histórica corre una vez al día; durante una jornada de Champions eso
+no basta. Este módulo trae los marcadores del día directamente de ESPN y los
+aplica sobre la base:
 
-  - Partidos TERMINADOS  -> se guardan como jugados (rellena el marcador).
+  - Partidos TERMINADOS  -> se guardan como jugados (rellena el marcador) y se
+                            pueblan sus goles en `goleadores`.
   - Partidos EN CURSO    -> se devuelven aparte para mostrar "EN VIVO x-y"
                             (no se marcan como jugados ni se usan para el modelo).
 
-Fuente: site.api.espn.com (endpoint público de marcadores del Mundial). Sin key.
+El emparejamiento con la base es por **espn_id**, no por nombre. En selecciones
+un diccionario de alias bastaba; con clubes sería una fuente constante de fallos
+("Internazionale" / "Inter Milan", "Bodo/Glimt", "FC Bayern München").
 """
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from datetime import datetime, timedelta, timezone
 
-import requests
-
+from ..config import cargar_config, competicion_id
 from . import db
+from . import espn_api as espn
 
 # México centro = UTC-6 todo el año (el país abolió el horario de verano en 2022).
 TZ_MX = timezone(timedelta(hours=-6))
+
+# Estados de ESPN que significan "aún no ha empezado".
+ESTADOS_NO_INICIADO = {"Scheduled", "Postponed", "Canceled", "Delayed", "TBD"}
 
 
 def hora_mexico(iso_utc: str) -> str:
@@ -37,104 +40,111 @@ def hora_mexico(iso_utc: str) -> str:
     except ValueError:
         return ""
 
-ESPN_URL = ("https://site.api.espn.com/apis/site/v2/sports/soccer/"
-            "fifa.world/scoreboard?dates={fecha}")
 
-# Alias de nombres ESPN -> forma normalizada de nuestra BD (ya normalizados).
-# Solo para los que NO coinciden tras normalizar acentos/puntuación.
-ALIAS = {
-    "czechia": "czech republic",
-    "usa": "united states",
-    "ir iran": "iran",
-    "korea republic": "south korea",
-    "cote divoire": "ivory coast",
-    "cabo verde": "cape verde",
-}
+def obtener_marcadores(fecha_iso: str, comp: str | None = None) -> list[dict]:
+    """Partidos de ESPN de la competición activa para una fecha (sin caché)."""
+    comp = comp or competicion_id()
+    return espn.partidos_de_fecha(comp, fecha_iso)
 
 
-def _norm(s: str) -> str:
-    """Normaliza un nombre de equipo para comparar entre fuentes:
-    quita acentos, pasa a minúsculas, elimina 'and'/puntuación y espacios extra."""
-    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
-    s = s.lower().replace("&", " and ")
-    s = re.sub(r"[^a-z0-9 ]", " ", s)
-    s = f" {s} ".replace(" and ", " ")          # quitar la palabra 'and'
-    s = re.sub(r"\s+", " ", s).strip()
-    return ALIAS.get(s, s)
+def _guardar_goles(con, comp: str, espn_id: str, fecha: str) -> int:
+    """Baja los goles de un partido terminado y los guarda en `goleadores`.
+
+    Sin esto, un pick de 'primer equipo en anotar' queda sin resolver y
+    `seguimiento._acumula_combo` descarta el día entero del histórico de parlays.
+    """
+    ya = con.execute("SELECT COUNT(*) n FROM goleadores WHERE espn_id=?",
+                     (espn_id,)).fetchone()["n"]
+    if ya:
+        return 0
+
+    goles = espn.goles_del_partido(comp, espn_id)
+    if not goles:
+        return 0
+
+    con.executemany(
+        """INSERT OR IGNORE INTO goleadores
+             (espn_id, fecha, equipo, equipo_id, jugador, minuto, autogol, penal)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [(espn_id, fecha, g["equipo"], g["equipo_id"], g["jugador"],
+          g["minuto"], g["autogol"], g["penal"]) for g in goles],
+    )
+    return len(goles)
 
 
-def obtener_marcadores(fecha_iso: str) -> list[dict]:
-    """Descarga los partidos del Mundial para una fecha 'YYYY-MM-DD' desde ESPN.
-    Devuelve lista de dicts: {equipos: [(nombre, goles), ...], completed, estado}."""
-    fecha = fecha_iso.replace("-", "")
-    r = requests.get(ESPN_URL.format(fecha=fecha), timeout=20)
-    r.raise_for_status()
-    data = r.json()
-    partidos = []
-    for ev in data.get("events", []):
-        comp = ev.get("competitions", [{}])[0]
-        tipo = comp.get("status", {}).get("type", {})
-        equipos = []
-        for c in comp.get("competitors", []):
-            nombre = c.get("team", {}).get("displayName")
-            try:
-                goles = int(c.get("score"))
-            except (TypeError, ValueError):
-                goles = None
-            equipos.append((nombre, goles))
-        if len(equipos) == 2:
-            partidos.append({
-                "equipos": equipos,
-                "completed": bool(tipo.get("completed")),
-                "estado": tipo.get("description", ""),
-                "fecha_hora": ev.get("date", ""),  # ISO en UTC
-            })
-    return partidos
-
-
-def aplicar(con, fecha_iso: str) -> dict:
+def aplicar(con, fecha_iso: str, cfg: dict | None = None) -> dict:
     """Aplica los marcadores de ESPN a la base para una fecha.
 
-    Devuelve {"finales": n, "vivo": {(local, visitante): {"gl","gv","estado"}}}:
-      - 'finales' = nº de partidos terminados que se guardaron como jugados.
-      - 'vivo'    = partidos en curso (para mostrar "EN VIVO", sin grabarlos
-                    como jugados).
-    """
-    try:
-        espn = obtener_marcadores(fecha_iso)
-    except Exception:
-        return {"finales": 0, "vivo": {}}  # degradación elegante: sin live, seguimos
+    Devuelve {"finales", "vivo", "horarios", "goles"}:
+      - 'finales'  = nº de partidos terminados que se guardaron como jugados.
+      - 'vivo'     = {(local, visitante): {"gl","gv","estado"}} de los partidos
+                     en curso (para mostrar "EN VIVO", sin grabarlos como jugados).
+      - 'horarios' = {(local, visitante): {"utc","mx"}}.
+      - 'goles'    = nº de goles nuevos guardados en `goleadores`.
 
-    # Partidos del Mundial 2026 que tenemos en BD para esa fecha
-    db_rows = con.execute(
-        "SELECT local, visitante FROM partidos "
-        "WHERE es_mundial2026=1 AND fecha=?", (fecha_iso,)).fetchall()
+    Ante cualquier fallo de red devuelve la estructura vacía COMPLETA (con todas
+    las claves) para que la interfaz no tenga que defenderse de un dict a medias.
+    """
+    vacio = {"finales": 0, "vivo": {}, "horarios": {}, "goles": 0}
+    cfg = cfg or cargar_config()
+    comp = competicion_id(cfg)
+
+    try:
+        partidos_espn = obtener_marcadores(fecha_iso, comp)
+    except Exception:
+        return vacio                      # degradación elegante: sin live, seguimos
+
+    # Lo que tenemos en BD para esa fecha, indexado por espn_id.
+    en_bd = {r["espn_id"]: r for r in con.execute(
+        "SELECT espn_id, local, visitante FROM partidos WHERE competicion=? AND fecha=?",
+        (comp, fecha_iso)).fetchall()}
 
     finales = 0
+    goles_nuevos = 0
     vivo: dict = {}
     horarios: dict = {}
-    for row in db_rows:
-        local, visit = row["local"], row["visitante"]
-        nl, nv = _norm(local), _norm(visit)
-        for e in espn:
-            (n1, g1), (n2, g2) = e["equipos"]
-            en1, en2 = _norm(n1), _norm(n2)
-            if {en1, en2} != {nl, nv}:
+
+    for p in partidos_espn:
+        fila = en_bd.get(p["espn_id"])
+        if not fila:
+            # Partido que ESPN tiene y nosotros no (calendario movido): lo insertamos.
+            from .descargar_clubes import guardar_partidos
+            guardar_partidos(con, [p])
+            fila = con.execute(
+                "SELECT espn_id, local, visitante FROM partidos WHERE espn_id=?",
+                (p["espn_id"],)).fetchone()
+            if not fila:
                 continue
-            # Hora del partido (ISO UTC para ordenar + 'HH:MM' México para mostrar)
-            horarios[(local, visit)] = {
-                "utc": e["fecha_hora"], "mx": hora_mexico(e["fecha_hora"])}
-            # Asignar el marcador a NUESTRO orden local/visitante por nombre
-            gl = g1 if en1 == nl else g2
-            gv = g1 if en1 == nv else g2
-            if e["completed"]:
-                con.execute(
-                    "UPDATE partidos SET goles_local=?, goles_visitante=?, jugado=1 "
-                    "WHERE es_mundial2026=1 AND fecha=? AND local=? AND visitante=?",
-                    (gl, gv, fecha_iso, local, visit))
-                finales += 1
-            elif gl is not None and gv is not None and e["estado"] not in ("Scheduled",):
-                vivo[(local, visit)] = {"gl": gl, "gv": gv, "estado": e["estado"]}
-            break
+
+        clave = (fila["local"], fila["visitante"])
+        horarios[clave] = {"utc": p["fecha_hora"], "mx": hora_mexico(p["fecha_hora"])}
+
+        if p["jugado"]:
+            con.execute(
+                "UPDATE partidos SET goles_local=?, goles_visitante=?, jugado=1 "
+                "WHERE espn_id=?",
+                (p["goles_local"], p["goles_visitante"], p["espn_id"]))
+            finales += 1
+            goles_nuevos += _guardar_goles(con, comp, p["espn_id"], fecha_iso)
+        elif p["estado"] not in ESTADOS_NO_INICIADO:
+            # En curso: ESPN ya publica el marcador parcial aunque 'jugado' sea 0.
+            vivo[clave] = {"gl": p["marcador_local"] or 0,
+                           "gv": p["marcador_visitante"] or 0,
+                           "estado": p["estado"]}
+
     con.commit()
-    return {"finales": finales, "vivo": vivo, "horarios": horarios}
+    return {"finales": finales, "vivo": vivo, "horarios": horarios, "goles": goles_nuevos}
+
+
+if __name__ == "__main__":
+    import sys
+
+    fecha = sys.argv[1] if len(sys.argv) > 1 else datetime.now(TZ_MX).date().isoformat()
+    con = db.conectar()
+    db.inicializar(con)
+    r = aplicar(con, fecha)
+    print(f"{fecha}: {r['finales']} finales, {len(r['vivo'])} en vivo, "
+          f"{r['goles']} goles guardados")
+    for (l, v), d in r["vivo"].items():
+        print(f"  🔴 {l} {d['gl']}-{d['gv']} {v}  ({d['estado']})")
+    con.close()

@@ -101,10 +101,13 @@ def sugerir_handicap(p1x2: dict, lam: float, mu: float) -> dict:
 
 
 def todos_los_mercados(modelo, local: str, visit: str, neutral: int,
-                       lineas_goles=(1.5, 2.5, 3.5)) -> dict:
-    """Calcula todos los mercados de goles de un partido en un solo dict."""
-    M = modelo.matriz_marcador(local, visit, neutral)
-    lam, mu = modelo.lambdas_publicos(local, visit, neutral)
+                       lineas_goles=(1.5, 2.5, 3.5), liga: str | None = None) -> dict:
+    """Calcula todos los mercados de goles de un partido en un solo dict.
+
+    `liga` es la liga de la competición del partido; selecciona la ventaja de
+    local correcta (la de la Premier no es la de la Eliteserien)."""
+    M = modelo.matriz_marcador(local, visit, neutral, liga)
+    lam, mu = modelo.lambdas_publicos(local, visit, neutral, liga)
     p1x2 = resultado_1x2(M)
     hcap = sugerir_handicap(p1x2, lam, mu)
     return {

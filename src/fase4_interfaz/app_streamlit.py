@@ -28,19 +28,23 @@ RAIZ = Path(__file__).resolve().parents[2]
 if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
+from src.config import (cargar_config, competicion_id, competiciones,
+                        fijar_competicion, liga_de_competicion, nombre_competicion)
 from src.fase1_datos import db
 from src.fase1_datos import marcadores_vivo as mv
-from src.fase2_modelo.entrenar import cargar_config, entrenar_modelo
+from src.fase2_modelo import eliminatoria as elim
+from src.fase2_modelo import simulacion as sim
+from src.fase2_modelo.entrenar import entrenar_modelo
 from src.fase2_modelo.predecir_partido import predecir
 from src.fase3_recomendacion.generar_leyes import generar
 from src.fase4_interfaz.seguimiento import (
-    evaluar_rango, evaluar, _resultado_partido, _evaluar_parlay,
+    _evaluar_parlay, _resultado_partido, evaluar, evaluar_rango,
 )
 
 
 # --- Configuración de página -----------------------------------------------
 
-st.set_page_config(page_title="Predicciones Mundial 2026", page_icon="⚽",
+st.set_page_config(page_title="Predicciones de fútbol", page_icon="⚽",
                    layout="wide", initial_sidebar_state="expanded")
 
 CSS = """
@@ -110,7 +114,7 @@ EMOJI_CONF = {"alto": "🟢", "medio": "🟡", "bajo": "🔴"}
 
 # --- Carga cacheada ---------------------------------------------------------
 
-@st.cache_data(ttl=60 * 60 * 12, show_spinner="Actualizando datos del Mundial 2026...")
+@st.cache_data(ttl=60 * 60 * 12, show_spinner="Actualizando datos...")
 def asegurar_datos(dia: str) -> str:
     """Garantiza que la base existe y está FRESCA para el día dado.
 
@@ -122,11 +126,15 @@ def asegurar_datos(dia: str) -> str:
     """
     con = db.conectar()
     db.inicializar(con)
+    cfg = cargar_config()
     n = con.execute("SELECT COUNT(*) AS c FROM partidos").fetchone()["c"]
     ult = db.get_meta(con, "ultima_actualizacion")
     if n == 0 or ult != dia:
         from src.fase1_datos.actualizar_diario import actualizar
-        actualizar(con)
+        # Base vacía = despliegue nuevo sin `data/clubes.db`: hay que bajar TODO el
+        # histórico o el modelo entrenaría con cuatro partidos. Tarda bastante, pero
+        # pasa una sola vez; lo normal es que la base venga en el repo.
+        actualizar(con, cfg, completo=(n == 0))
         ult = db.get_meta(con, "ultima_actualizacion")
     con.close()
     return ult or dia
@@ -162,13 +170,37 @@ def cargar_historico(version: str):
     return datos
 
 
-def fechas_mundial():
+def fechas_competicion(version: str, comp: str):
     con = db.conectar()
     filas = con.execute(
-        "SELECT DISTINCT fecha FROM partidos WHERE es_mundial2026=1 ORDER BY fecha"
+        "SELECT DISTINCT fecha FROM partidos WHERE competicion=? "
+        "AND temporada=(SELECT MAX(temporada) FROM partidos WHERE competicion=?) "
+        "ORDER BY fecha",
+        (comp, comp),
     ).fetchall()
     con.close()
     return [f["fecha"] for f in filas]
+
+
+@st.cache_data(show_spinner="Simulando la fase liga 10.000 veces...")
+def cargar_simulacion(version: str, comp: str):
+    """Monte Carlo de la fase liga: probabilidad de top-8 / playoff / eliminación."""
+    con = db.conectar()
+    cfg = cargar_config()
+    fila = con.execute(
+        "SELECT MAX(temporada) t FROM partidos WHERE competicion=?", (comp,)).fetchone()
+    temporada = fila["t"] if fila else None
+    if temporada is None:
+        con.close()
+        return None
+    partidos = sim.partidos_fase_liga(con, comp, temporada)
+    if not partidos:
+        con.close()
+        return None
+    modelo, _ = cargar_modelo_y_cfg(version)
+    datos = sim.simular_fase_liga(modelo, partidos, cfg, liga_de_competicion(comp, cfg))
+    con.close()
+    return datos
 
 
 # --- Componentes visuales ---------------------------------------------------
@@ -263,14 +295,15 @@ def barra_1x2(loc, vis, p):
 
 def render_tarjeta_partido(con, modelo, cfg, row, live: dict = None):
     loc, vis = row["local"], row["visitante"]
-    pred = predecir(con, modelo, cfg, loc, vis, row["neutral"])
+    pred = predecir(con, modelo, cfg, loc, vis, row["neutral"],
+                    competicion=row["competicion"])
     conf = pred["confianza"]
     sede = "campo neutral" if pred["neutral"] else "con localía"
     hora = _hora_mx(live, loc, vis)
     hora_txt = f"🕐 {hora} hrs MX · " if hora else ""
     with st.container(border=True):
         st.markdown(f"#### {loc} 🆚 {vis}")
-        st.caption(f"{hora_txt}{row['ciudad']} · {sede} · "
+        st.caption(f"{hora_txt}{row['ciudad'] or 'sede por confirmar'} · {sede} · "
                    f"{EMOJI_CONF[conf['nivel']]} confianza {conf['nivel']} "
                    f"({loc} {conf['n_local']} part., {vis} {conf['n_visit']} part.)")
         barra_1x2(loc, vis, pred["1x2"])
@@ -438,10 +471,108 @@ def render_parlays(hist: dict):
 
 # --- App --------------------------------------------------------------------
 
+def render_clasificacion(version: str, comp: str):
+    """Pestaña de clasificación proyectada de la fase liga (Monte Carlo)."""
+    datos = cargar_simulacion(version, comp)
+    if not datos:
+        st.info("Esta competición no tiene fase liga con datos suficientes.")
+        return
+
+    st.caption(
+        f"{datos['n_sims']:,} simulaciones · {datos['jugados']} partidos ya jugados "
+        f"y {datos['pendientes']} por jugar. Top-{datos['plazas_directas']} pasa "
+        f"directo a octavos; del {datos['plazas_directas'] + 1} al "
+        f"{datos['plazas_playoff']} juega el playoff; el resto queda eliminado."
+        .replace(",", " "))
+
+    filas = [{
+        "Equipo": e,
+        "Pos. media": round(v["posicion_media"], 1),
+        "Pts medios": round(v["puntos_medios"], 1),
+        "Top-8 %": round(100 * v["top_directo"], 1),
+        "Playoff %": round(100 * v["playoff"], 1),
+        "Fuera %": round(100 * v["eliminado"], 1),
+    } for e, v in sim.tabla_ordenada(datos)]
+
+    df = pd.DataFrame(filas)
+    st.dataframe(
+        df, use_container_width=True, hide_index=True,
+        column_config={
+            "Top-8 %": st.column_config.ProgressColumn(
+                "Top-8 %", format="%.1f%%", min_value=0, max_value=100),
+            "Playoff %": st.column_config.ProgressColumn(
+                "Playoff %", format="%.1f%%", min_value=0, max_value=100),
+            "Fuera %": st.column_config.ProgressColumn(
+                "Fuera %", format="%.1f%%", min_value=0, max_value=100),
+        })
+
+    largo = df.melt(id_vars="Equipo", value_vars=["Top-8 %", "Playoff %", "Fuera %"],
+                    var_name="Destino", value_name="Probabilidad")
+    grafico = alt.Chart(largo).mark_bar().encode(
+        y=alt.Y("Equipo:N", sort=list(df["Equipo"]), title=None),
+        x=alt.X("Probabilidad:Q", title="Probabilidad (%)", stack="normalize",
+                axis=alt.Axis(format="%")),
+        color=alt.Color("Destino:N", scale=alt.Scale(
+            domain=["Top-8 %", "Playoff %", "Fuera %"],
+            range=["#22c55e", "#f59e0b", "#ef4444"]), title=None),
+        tooltip=["Equipo", "Destino", "Probabilidad"],
+    ).properties(height=max(320, 18 * len(df)))
+    st.altair_chart(grafico, use_container_width=True)
+
+
+def render_eliminatorias(con, modelo, cfg, comp: str, fecha: str, temporada: int):
+    """Probabilidades de clasificación de las eliminatorias a doble partido."""
+    rondas = con.execute(
+        """SELECT DISTINCT ronda FROM partidos
+            WHERE competicion=? AND temporada=? AND leg IS NOT NULL
+            ORDER BY ronda""", (comp, temporada)).fetchall()
+    if not rondas:
+        st.info("Todavía no hay eliminatorias a doble partido en el calendario. "
+                "Empiezan en febrero.")
+        return
+
+    liga = liga_de_competicion(comp, cfg)
+    nombres = [r["ronda"] for r in rondas]
+    ronda = st.selectbox("Ronda", nombres, index=len(nombres) - 1)
+    partidos = con.execute(
+        "SELECT * FROM partidos WHERE competicion=? AND temporada=? AND ronda=?",
+        (comp, temporada, ronda)).fetchall()
+
+    for tie in elim.emparejar_legs(partidos):
+        try:
+            r = elim.eliminatoria(modelo, tie["equipo_a"], tie["equipo_b"],
+                                  tie["marcador_ida"], liga)
+        except KeyError:
+            continue
+        with st.container(border=True):
+            ida = (f"ida {r['marcador_ida'][0]}-{r['marcador_ida'][1]}"
+                   if r["ida_jugada"] else "ida por jugar")
+            st.markdown(f"**{tie['equipo_a']}** vs **{tie['equipo_b']}** · {ida}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric(f"Pasa {tie['equipo_a']}", f"{100*r['pasa_a']:.0f}%")
+            c2.metric(f"Pasa {tie['equipo_b']}", f"{100*r['pasa_b']:.0f}%")
+            c3.metric("Se va a prórroga", f"{100*r['prorroga']:.0f}%")
+            ou = elim.over_under_global(r, (2.5, 3.5, 4.5))
+            st.caption("Goles en el global de la eliminatoria: " + " · ".join(
+                f"Over {l} **{100*ou[f'over_{l}']:.0f}%**" for l in (2.5, 3.5, 4.5)))
+
+
+# --- App --------------------------------------------------------------------
+
 def main():
+    # Selector de competición: se aplica ANTES de leer nada de la base, porque
+    # decide qué partidos son "los del día".
+    cfg = cargar_config()
+    catalogo = competiciones(cfg)
+    comp_url = st.query_params.get("comp")
+    if comp_url in catalogo:
+        fijar_competicion(comp_url)
+    comp = competicion_id(cfg)
+    titulo = nombre_competicion(cfg)
+
     st.markdown(
         "<div class='casino-hd'>"
-        "<span class='t'>🎰 <span class='neon'>MUNDIAL 2026</span> "
+        f"<span class='t'>🎰 <span class='neon'>{titulo.upper()}</span> "
         "<span class='gold'>BETS</span> ⚽</span><br>"
         "<span style='opacity:.8;font-size:.88rem'>Picks del día · combinadas · "
         "histórico de aciertos — juego amistoso entre amigos, "
@@ -452,13 +583,26 @@ def main():
     hoy = date.today().isoformat()
     version = asegurar_datos(hoy)
 
-    fechas = fechas_mundial()
+    # Sidebar
+    st.sidebar.header("Competición")
+    slugs = list(catalogo.keys())
+    nombres = {c: catalogo[c].get("nombre", c) for c in slugs}
+    comp_sel = st.sidebar.selectbox(
+        "Elige la competición", slugs, index=slugs.index(comp) if comp in slugs else 0,
+        format_func=lambda c: nombres[c], key="sel_comp")
+    if comp_sel != comp:
+        st.query_params["comp"] = comp_sel
+        st.query_params.pop("fecha", None)
+        fijar_competicion(comp_sel)
+        st.rerun()
+    st.query_params["comp"] = comp_sel
+
+    fechas = fechas_competicion(version, comp)
     if not fechas:
-        st.error("No hay datos. Corre primero: "
-                 "`python -m src.fase1_datos.descargar_historico`")
+        st.error("No hay datos para esta competición. Corre primero: "
+                 "`python -m src.fase1_datos.descargar_clubes`")
         return
 
-    # Sidebar
     st.sidebar.header("Jornada")
     # Recordar la fecha elegida entre refrescos (se guarda en la URL), para que NO
     # se "salte de día" al recargar la página.
@@ -468,7 +612,9 @@ def main():
     elif hoy in fechas:
         idx = fechas.index(hoy)
     else:
-        idx = len(fechas) - 1
+        # Sin partidos hoy: la jornada más cercana en el futuro, o la última jugada.
+        futuras = [f for f in fechas if f >= hoy]
+        idx = fechas.index(futuras[0]) if futuras else len(fechas) - 1
     fecha = st.sidebar.selectbox("Elige la fecha", fechas, index=idx, key="sel_fecha")
     st.query_params["fecha"] = fecha
     st.sidebar.caption(f"📅 Datos actualizados al {version}")
@@ -476,7 +622,7 @@ def main():
         from src.fase1_datos.actualizar_diario import actualizar
         con = db.conectar()
         with st.spinner("Descargando datos frescos..."):
-            actualizar(con)
+            actualizar(con, cfg)
         con.close()
         st.cache_resource.clear()
         st.cache_data.clear()
@@ -488,10 +634,10 @@ def main():
 
     st.sidebar.caption("🔴 Marcadores en vivo · pulsa 🔄 Refrescar o recarga la página")
 
-    cuerpo(version, fecha)
+    cuerpo(version, fecha, comp)
 
 
-def cuerpo(version: str, fecha: str):
+def cuerpo(version: str, fecha: str, comp: str):
     """Cuerpo de la app. Los marcadores en vivo se refrescan al RECARGAR la página
     o al pulsar '🔄 Refrescar ya' (el auto-refresco automático se desactivó para
     mantener la app estable en el plan gratis)."""
@@ -499,24 +645,25 @@ def cuerpo(version: str, fecha: str):
     modelo, cfg = cargar_modelo_y_cfg(version)
     con = db.conectar()
     # Marcadores en vivo/finales de ESPN para la fecha (rellena los terminados).
-    # Si ESPN falla, mv.aplicar degrada solo y la app sigue con lo de martj42.
+    # Si ESPN falla, mv.aplicar degrada solo y la app sigue con lo ya descargado.
     try:
-        live = mv.aplicar(con, fecha)
+        live = mv.aplicar(con, fecha, cfg)
     except Exception:
-        live = {"finales": 0, "vivo": {}, "horarios": {}}
+        live = {"finales": 0, "vivo": {}, "horarios": {}, "goles": 0}
     cc1, cc2 = st.columns([4, 1])
     cc1.caption(f"🔴 Marcadores al **{_dt.now(mv.TZ_MX).strftime('%H:%M:%S')}** hrs MX "
                 f"· pulsa 🔄 o recarga para traer los más nuevos")
     cc2.button("🔄 Refrescar ya", key="refresh_live")
-    partidos = db.calendario_de_fecha(con, fecha)
+    partidos = db.calendario_de_fecha(con, fecha, comp)
 
-    tab1, tab2, tab3 = st.tabs(["🎯 Picks del día", "📊 Detalle por partido",
-                                "🏆 Histórico de aciertos"])
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["🎯 Picks del día", "📊 Detalle por partido",
+         "🏁 Clasificación proyectada", "🏆 Histórico de aciertos"])
 
     # --- TAB 1: las 3 Leyes ---
     with tab1:
         if not partidos:
-            st.info("No hay partidos del Mundial 2026 en esta fecha.")
+            st.info("No hay partidos en esta fecha.")
         else:
             leyes = generar(con, modelo, cfg, fecha)
             N = cfg["leyes"].get("max_picks", 3)
@@ -538,7 +685,7 @@ def cuerpo(version: str, fecha: str):
     # --- TAB 2: detalle por partido ---
     with tab2:
         if not partidos:
-            st.info("No hay partidos del Mundial 2026 en esta fecha.")
+            st.info("No hay partidos en esta fecha.")
         else:
             # Ordenar los partidos por horario (los más temprano primero)
             partidos_ord = sorted(
@@ -548,9 +695,23 @@ def cuerpo(version: str, fecha: str):
                 with cols[k % 2]:
                     render_tarjeta_partido(con, modelo, cfg, row, live)
 
-    # --- TAB 3: histórico de aciertos (bajo demanda, para no frenar la carga) ---
+    # --- TAB 3: fase liga (Monte Carlo) o eliminatorias, según toque ---
     with tab3:
-        st.subheader("¿Qué tan bien ha acertado el modelo en este Mundial?")
+        con_leg = [p for p in partidos if p["leg"]]
+        if con_leg:
+            st.subheader("Probabilidades de clasificación")
+            st.caption("Global de los dos partidos, con prórroga (30 min a ritmo "
+                       "proporcional) y penales al 50%. Sin regla de goles fuera "
+                       "de casa: la UEFA la abolió en 2021.")
+            render_eliminatorias(con, modelo, cfg, comp, fecha,
+                                 con_leg[0]["temporada"])
+        else:
+            st.subheader("¿Dónde acaba cada equipo en la fase liga?")
+            render_clasificacion(version, comp)
+
+    # --- TAB 4: histórico de aciertos (bajo demanda, para no frenar la carga) ---
+    with tab4:
+        st.subheader("¿Qué tan bien ha acertado el modelo esta temporada?")
         st.caption("Cada jornada se predice entrenando SOLO con datos previos "
                    "(sin trampa).")
         if st.session_state.get("calc_hist"):

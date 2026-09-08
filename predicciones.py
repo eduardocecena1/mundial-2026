@@ -4,9 +4,10 @@ predicciones.py — Punto de entrada del proyecto.
 
 Atajo para correr la interfaz de línea de comandos:
 
-    python predicciones.py --fecha 2026-06-25
-    python predicciones.py --fecha 2026-06-25 --actualizar
+    python predicciones.py --fecha 2026-09-30
+    python predicciones.py --fecha 2026-09-30 --actualizar
     python predicciones.py --detalle
+    python predicciones.py --fecha 2027-02-17 --eliminatorias
 
 Es para un juego amistoso entre amigos: el enfoque es diversión y presumir
 aciertos, NO asesoría financiera ni apuestas reales con dinero.

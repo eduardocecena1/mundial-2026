@@ -1,46 +1,83 @@
-# config.yaml — Parámetros del proyecto de predicciones Mundial 2026.
+# config.yaml — Parámetros del sistema de predicciones.
 # Editable sin tocar código.
 
+# --- Competición objetivo ---------------------------------------------------
+# Sobre esta competición se generan los picks, los parlays y el histórico.
+# Puede cambiarse a cualquier slug presente en 'datos.competiciones'
+# (p.ej. "esp.1" para LaLiga o "eng.1" para la Premier) sin tocar nada más.
+competicion:
+  id: "uefa.champions"
+  nombre: "UEFA Champions League 2026-27"
+  temporada: 2026                 # temporada ESPN: 2026 = 2026-27
+  bd: "data/clubes.db"
+
 datos:
-  # Desde qué fecha se carga el histórico (3 ciclos mundialistas).
-  desde: "2014-01-01"
+  # Desde qué fecha se carga el histórico de clubes (8 temporadas).
+  desde: "2018-07-01"
+
+  # Competiciones que se descargan y alimentan el modelo.
+  #   peso : cuánto INFORMA ese partido (no cuán fuerte es la liga).
+  #   liga : clave de agrupación para el modelo jerárquico (Paso 3).
+  # Nota: ESPN no cubre las ligas de Chequia, Ucrania, Eslovaquia ni Azerbaiyán.
+  # Slavia Prague, Shakhtar, Slovan Bratislava y Sabah FK se sostienen solo con
+  # sus partidos europeos y caen en la pseudo-liga "otras".
+  competiciones:
+    # Competiciones UEFA (son las que conectan las ligas entre sí)
+    uefa.champions:        {peso: 1.00, liga: "uefa", nombre: "Champions League"}
+    uefa.europa:           {peso: 0.95, liga: "uefa", nombre: "Europa League"}
+    uefa.europa.conf:      {peso: 0.85, liga: "uefa", nombre: "Conference League"}
+    uefa.champions_qual:   {peso: 0.80, liga: "uefa", nombre: "Previa Champions"}
+    uefa.europa_qual:      {peso: 0.75, liga: "uefa", nombre: "Previa Europa League"}
+    uefa.europa.conf_qual: {peso: 0.70, liga: "uefa", nombre: "Previa Conference"}
+    # Ligas domésticas
+    eng.1: {peso: 0.95, liga: "eng", nombre: "Premier League"}
+    esp.1: {peso: 0.95, liga: "esp", nombre: "LaLiga"}
+    ita.1: {peso: 0.95, liga: "ita", nombre: "Serie A"}
+    ger.1: {peso: 0.95, liga: "ger", nombre: "Bundesliga"}
+    fra.1: {peso: 0.95, liga: "fra", nombre: "Ligue 1"}
+    por.1: {peso: 0.90, liga: "por", nombre: "Primeira Liga"}
+    ned.1: {peso: 0.90, liga: "ned", nombre: "Eredivisie"}
+    tur.1: {peso: 0.90, liga: "tur", nombre: "Süper Lig"}
+    bel.1: {peso: 0.90, liga: "bel", nombre: "Pro League"}
+    gre.1: {peso: 0.90, liga: "gre", nombre: "Super League Grecia"}
+    aut.1: {peso: 0.90, liga: "aut", nombre: "Bundesliga Austria"}
+    nor.1: {peso: 0.90, liga: "nor", nombre: "Eliteserien"}
+    sco.1: {peso: 0.90, liga: "sco", nombre: "Premiership Escocia"}
+    den.1: {peso: 0.90, liga: "den", nombre: "Superliga Danesa"}
+    sui.1: {peso: 0.90, liga: "sui", nombre: "Super League Suiza"}
 
 modelo:
   # Vida media (en años) del decaimiento temporal: partidos más recientes pesan más.
-  # Dixon-Coles clásico usa ~0.5-1 año para clubes; para selecciones (juegan menos)
-  # conviene un valor mayor. Valor elegido por backtesting (ver src/backtesting).
-  vida_media_anios: 2.5
+  # Un club juega ~55 partidos al año (una selección ~10), así que la vida media
+  # es mucho más corta que el 2.5 que usaba el modelo del Mundial.
+  # Elegido por backtesting sobre 6 ventanas de Champions (`backtest --rapido --tune`).
+  # El óptimo es una MESETA: entre 0.75 y 1.5 el log-loss cambia en la 3ª decimal.
+  vida_media_anios: 1.0
 
-  # Regularización L2 (ridge) sobre ataque/defensa: encoge hacia la media a los
-  # equipos con pocos datos. Valor elegido por backtesting (--tune).
-  reg: 0.5
+  # Regularización L2 (ridge) sobre la DESVIACIÓN de cada equipo respecto a su liga.
+  # También en meseta entre 0.5 y 2.0; se toma el centro, que además contiene mejor
+  # a los recién ascendidos con 3 partidos jugados.
+  reg: 1.0
 
-  # Peso relativo de cada tipo de torneo (los partidos más competitivos informan más).
-  pesos_torneo:
-    "FIFA World Cup": 1.00
-    "FIFA World Cup qualification": 0.85
-    "UEFA Euro": 0.90
-    "Copa América": 0.90
-    "African Cup of Nations": 0.85
-    "AFC Asian Cup": 0.80
-    "UEFA Nations League": 0.80
-    "CONCACAF Gold Cup": 0.75
-    "Friendly": 0.50          # los amistosos informan menos
-    "_defecto": 0.70          # cualquier otro torneo
+  # Regularización L2 sobre los efectos de liga. Mucho más suave: las ligas tienen
+  # datos de sobra y no queremos aplastar las diferencias reales de nivel entre ellas.
+  # El backtest es prácticamente indiferente a este valor (de 0.01 a 0.2 el log-loss
+  # no se mueve), justo porque hay datos de sobra para estimarlos.
+  reg_liga: 0.01
 
   # Máximo de goles a considerar en la matriz de marcadores (0..max por equipo).
   max_goles: 8
 
 confianza:
   # Umbrales de número de partidos jugados (desde 'datos.desde') para el nivel.
-  alto: 40
-  medio: 15
+  # Calibrados para clubes: un grande europeo acumula 400+ partidos en 8 temporadas.
+  alto: 120
+  medio: 40
   # por debajo de 'medio' -> confianza baja
 
 # Líneas de apuesta a evaluar
 apuestas:
   lineas_goles: [1.5, 2.5, 3.5]
-  lineas_tarjetas: [3.5, 4.5]
 
 # Umbrales de probabilidad para clasificar las 3 "Leyes" (Fase 3)
 leyes:
@@ -49,3 +86,9 @@ leyes:
   arriesgada_min: 0.45  # 45-65%  -> Ley Arriesgada
   arriesgada_max: 0.65
   # por debajo -> material para la Ley Soñador
+
+# Simulación Monte Carlo de la fase liga (Paso 7)
+simulacion:
+  n_sims: 10000
+  plazas_directas: 8    # top-8 -> octavos directos
+  plazas_playoff: 24    # 9-24 -> playoff; 25-36 eliminados

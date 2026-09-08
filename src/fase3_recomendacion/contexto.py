@@ -1,7 +1,7 @@
 """
 contexto.py — Datos de contexto para justificar las recomendaciones.
 
-Calcula la forma reciente de cada selección y el head-to-head directo, para que
+Calcula la forma reciente de cada equipo y el head-to-head directo, para que
 cada apuesta recomendada venga con una explicación "basada en datos" (forma,
 promedio de goles, historial directo), como pide el proyecto.
 """
@@ -57,7 +57,10 @@ def _letra(fila, equipo: str) -> str:
 
 
 def head_to_head(con, a: str, b: str, hasta: str, anios: int = 12) -> dict:
-    """Historial directo entre dos equipos en los últimos 'anios'."""
+    """Historial directo entre dos equipos en los últimos 'anios'.
+
+    En clubes cuenta cualquier competición: un Madrid-Barça de LaLiga informa
+    igual que uno de Champions."""
     desde = date.fromisoformat(hasta).replace(
         year=date.fromisoformat(hasta).year - anios).isoformat()
     filas = con.execute(

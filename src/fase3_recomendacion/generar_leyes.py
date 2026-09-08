@@ -89,7 +89,7 @@ def _pago(prob: float) -> float:
 # --- Generación de las 3 Leyes ----------------------------------------------
 
 def generar(con, modelo, cfg: dict, fecha: str) -> dict:
-    """Genera las 3 listas de apuestas para una fecha del Mundial."""
+    """Genera las 3 listas de apuestas para una fecha de la competición activa."""
     leyes_cfg = cfg["leyes"]
     seg_min = leyes_cfg["segura_min"]
     arr_min, arr_max = leyes_cfg["arriesgada_min"], leyes_cfg["arriesgada_max"]
@@ -99,7 +99,8 @@ def generar(con, modelo, cfg: dict, fecha: str) -> dict:
 
     for row in partidos:
         loc, vis, neutral = row["local"], row["visitante"], row["neutral"]
-        pred = predecir(con, modelo, cfg, loc, vis, neutral)
+        pred = predecir(con, modelo, cfg, loc, vis, neutral,
+                        competicion=row["competicion"])
         nivel = pred["confianza"]["nivel"]
         cands = _candidatos(pred)
         encab = f"{loc} vs {vis}"

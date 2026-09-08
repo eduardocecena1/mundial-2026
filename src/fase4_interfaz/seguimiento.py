@@ -1,43 +1,89 @@
 """
 seguimiento.py — FASE 4: histórico de aciertos del modelo.
 
-Evalúa cómo le habrían ido las 3 Leyes en jornadas YA jugadas del Mundial 2026.
-Para cada fecha pasada entrena el modelo SOLO con datos anteriores (sin trampa),
-genera las recomendaciones y las compara con el resultado real.
+Evalúa cómo le habrían ido las 3 Leyes en jornadas YA jugadas de la competición
+activa. Para cada fecha pasada entrena el modelo SOLO con datos anteriores (sin
+trampa), genera las recomendaciones y las compara con el resultado real.
+
+Nota sobre eliminatorias: el 1X2 se resuelve a 90 minutos, como en cualquier casa
+de apuestas. Un partido que acaba empatado y se decide en la prórroga o en los
+penales cuenta como empate para el mercado, aunque haya un clasificado.
 
 Uso:
-    python -m src.fase4_interfaz.seguimiento                       # todo el Mundial 2026 jugado
-    python -m src.fase4_interfaz.seguimiento --desde 2026-06-11 --hasta 2026-06-23
+    python -m src.fase4_interfaz.seguimiento                       # toda la temporada jugada
+    python -m src.fase4_interfaz.seguimiento --desde 2026-09-01 --hasta 2027-01-31
 """
 
 from __future__ import annotations
 
 import argparse
 
+from ..config import cargar_config, competicion_id, nombre_competicion
 from ..fase1_datos import db
-from ..fase2_modelo.entrenar import cargar_config, entrenar_modelo
+from ..fase2_modelo.entrenar import entrenar_modelo
 from ..fase3_recomendacion.generar_leyes import generar
+
+# Centinela: el partido acabó 0-0, así que ningún equipo anotó primero.
+SIN_GOLES = object()
+
+
+def _partido(con, local, visit, fecha):
+    """Fila del partido jugado (o None si no está)."""
+    return con.execute(
+        """SELECT espn_id, goles_local, goles_visitante FROM partidos
+            WHERE jugado=1 AND fecha=? AND local=? AND visitante=?""",
+        (fecha, local, visit),
+    ).fetchone()
 
 
 def _resultado_partido(con, local, visit, fecha):
     """Marcador real de un partido jugado (o None si no está)."""
-    f = con.execute(
-        """SELECT goles_local, goles_visitante FROM partidos
-            WHERE jugado=1 AND fecha=? AND local=? AND visitante=?""",
-        (fecha, local, visit),
-    ).fetchone()
+    f = _partido(con, local, visit, fecha)
     return (f["goles_local"], f["goles_visitante"]) if f else None
 
 
 def _primer_equipo_gol(con, local, visit, fecha):
-    """Equipo que anotó primero (de la tabla de goleadores), o None."""
-    f = con.execute(
-        """SELECT equipo FROM goleadores
-            WHERE fecha=? AND local=? AND visitante=? AND minuto IS NOT NULL
-            ORDER BY minuto ASC LIMIT 1""",
-        (fecha, local, visit),
-    ).fetchone()
-    return f["equipo"] if f else None
+    """Equipo que anotó primero, o None si no se puede saber.
+
+    Se empareja por espn_id: en clubes hay eliminatorias de ida y vuelta entre
+    los mismos dos equipos, así que (fecha, local, visitante) ya no identifica
+    un partido de forma tan clara como en un Mundial.
+
+    Si el partido está jugado pero no tenemos sus goles, se bajan de ESPN al
+    vuelo y se guardan. Sin esto, un solo pick de 'primer gol' sin resolver
+    anula el parlay del día entero en las estadísticas (`_acumula_combo`).
+    """
+    p = _partido(con, local, visit, fecha)
+    if p is None:
+        return None
+
+    def _consulta():
+        f = con.execute(
+            """SELECT equipo FROM goleadores
+                WHERE espn_id=? AND minuto IS NOT NULL
+                ORDER BY minuto ASC LIMIT 1""",
+            (p["espn_id"],),
+        ).fetchone()
+        return f["equipo"] if f else None
+
+    primero = _consulta()
+    if primero is not None:
+        return primero
+
+    # Sin goles registrados: si el partido acabó 0-0, no hay primer goleador y
+    # eso es un dato, no una laguna.
+    if (p["goles_local"], p["goles_visitante"]) == (0, 0):
+        return SIN_GOLES
+
+    from ..fase1_datos.marcadores_vivo import _guardar_goles
+    from ..config import competicion_id
+    try:
+        if _guardar_goles(con, competicion_id(), p["espn_id"], fecha):
+            con.commit()
+            return _consulta()
+    except Exception:
+        pass                      # sin red, el pick queda sin evaluar (None)
+    return None
 
 
 def evaluar(con, rec: dict, fecha: str):
@@ -71,22 +117,39 @@ def evaluar(con, rec: dict, fecha: str):
         primero = _primer_equipo_gol(con, rec["local"], rec["visitante"], fecha)
         if primero is None:
             return None
+        if primero is SIN_GOLES:
+            return False          # 0-0: nadie anotó primero, el pick falla
         objetivo = rec["local"] if s == "local" else rec["visitante"]
         return primero == objetivo
     return None  # Hcap u otros: no evaluado aquí
 
 
-def _fechas_jugadas(con, desde, hasta):
+def _fechas_jugadas(con, desde, hasta, comp=None):
+    comp = comp or competicion_id()
     filas = con.execute(
         """SELECT DISTINCT fecha FROM partidos
-            WHERE es_mundial2026=1 AND jugado=1 AND fecha>=? AND fecha<=?
+            WHERE competicion=? AND jugado=1 AND fecha>=? AND fecha<=?
             ORDER BY fecha""",
-        (desde, hasta),
+        (comp, desde, hasta),
     ).fetchall()
     return [f["fecha"] for f in filas]
 
 
-def evaluar_rango(con, cfg, desde="2026-06-01", hasta="2026-12-31") -> dict:
+def rango_temporada(cfg=None) -> tuple[str, str]:
+    """Ventana de la temporada en curso de la competición activa.
+
+    La temporada europea va de julio a junio; sin esto habría que tocar código
+    cada año."""
+    from datetime import date
+    cfg = cfg or cargar_config()
+    temporada = cfg.get("competicion", {}).get("temporada")
+    if temporada is None:
+        hoy = date.today()
+        temporada = hoy.year if hoy.month >= 7 else hoy.year - 1
+    return f"{temporada}-07-01", f"{int(temporada) + 1}-06-30"
+
+
+def evaluar_rango(con, cfg, desde=None, hasta=None) -> dict:
     """Calcula el histórico de aciertos por fecha y los totales (sin imprimir).
     Devuelve un dict reutilizable por la CLI y por la web.
 
@@ -95,6 +158,9 @@ def evaluar_rango(con, cfg, desde="2026-06-01", hasta="2026-12-31") -> dict:
       "totales": {"segura": [a, t], "arriesgada": [a, t], "sonador": [a, t]}
     }
     """
+    if desde is None or hasta is None:
+        d_def, h_def = rango_temporada(cfg)
+        desde, hasta = desde or d_def, hasta or h_def
     n_corto = cfg.get("leyes", {}).get("max_picks", 3)  # nº de patas del parlay "corto"
     fechas = _fechas_jugadas(con, desde, hasta)
     tot = {"segura": [0, 0], "arriesgada": [0, 0], "sonador": [0, 0]}        # picks sueltos
@@ -185,14 +251,14 @@ def _resumen_parlays(parlays):
     return {"jugados": jugados, "ganados": ganados, "balance": round(balance, 2)}
 
 
-def correr(con, cfg, desde="2026-06-01", hasta="2026-12-31"):
+def correr(con, cfg, desde=None, hasta=None):
     datos = evaluar_rango(con, cfg, desde, hasta)
     if not datos["fechas"]:
-        print("No hay fechas jugadas del Mundial 2026 en ese rango.")
+        print(f"No hay fechas jugadas de {nombre_competicion(cfg)} en ese rango.")
         return
 
     f0, f1 = datos["fechas"][0]["fecha"], datos["fechas"][-1]["fecha"]
-    print(f"HISTÓRICO DE ACIERTOS — Mundial 2026 ({f0} a {f1})")
+    print(f"HISTÓRICO DE ACIERTOS — {nombre_competicion(cfg)} ({f0} a {f1})")
     print("(cada jornada se predice entrenando SOLO con datos previos)\n")
     for fila in datos["fechas"]:
         linea = [f"  {fila['fecha']}:"]
@@ -217,8 +283,10 @@ def correr(con, cfg, desde="2026-06-01", hasta="2026-12-31"):
 
 def main():
     parser = argparse.ArgumentParser(description="Histórico de aciertos del modelo.")
-    parser.add_argument("--desde", default="2026-06-01")
-    parser.add_argument("--hasta", default="2026-12-31")
+    parser.add_argument("--desde", default=None,
+                        help="Por defecto, el inicio de la temporada en curso.")
+    parser.add_argument("--hasta", default=None,
+                        help="Por defecto, el fin de la temporada en curso.")
     args = parser.parse_args()
     con = db.conectar()
     cfg = cargar_config()
