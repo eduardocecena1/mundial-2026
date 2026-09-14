@@ -174,6 +174,64 @@ def calendario_de_fecha(con: sqlite3.Connection, fecha: str, comp: str | None = 
     ).fetchall()
 
 
+def calendario_multi_de_fecha(con: sqlite3.Connection, fecha: str,
+                              comps: list | None = None):
+    """Partidos de VARIAS competiciones en una fecha concreta.
+
+    Ojo a la diferencia con `calendario_de_fecha`: allí `comp=None` significa "la
+    competición activa"; aquí `comps=None` significa de verdad **todas**. Se
+    resuelve con el índice `idx_part_fecha`, que ya existía.
+    """
+    sql = "SELECT * FROM partidos WHERE fecha = ?"
+    params: list = [fecha]
+    if comps:
+        sql += " AND competicion IN (%s)" % ",".join("?" * len(comps))
+        params.extend(comps)
+    sql += " ORDER BY fecha_hora, id"
+    return con.execute(sql, params).fetchall()
+
+
+def fechas_con_partidos(con: sqlite3.Connection, desde: str | None = None,
+                        hasta: str | None = None,
+                        comps: list | None = None) -> list[str]:
+    """Fechas que tienen al menos un partido en cualquiera de las competiciones.
+
+    El selector de fecha de la vista multi-liga no puede usar
+    `fechas_competicion`, que solo lista los días de UNA competición: si la
+    Champions no juega el sábado, ese sábado no sería ni seleccionable.
+    """
+    sql = "SELECT DISTINCT fecha FROM partidos WHERE 1=1"
+    params: list = []
+    if desde:
+        sql += " AND fecha >= ?"
+        params.append(desde)
+    if hasta:
+        sql += " AND fecha <= ?"
+        params.append(hasta)
+    if comps:
+        sql += " AND competicion IN (%s)" % ",".join("?" * len(comps))
+        params.extend(comps)
+    sql += " ORDER BY fecha"
+    return [f["fecha"] for f in con.execute(sql, params).fetchall()]
+
+
+def competiciones_vigentes(con: sqlite3.Connection, desde: str,
+                           comps: list | None = None) -> set:
+    """Competiciones que AÚN tienen partidos por jugar a partir de 'desde'.
+
+    Es el filtro que excluye solo una liga que se quedó sin calendario, sin
+    mantener una lista negra a mano: hoy `sui.1` está congelada desde
+    2025-09-28 y sus fuerzas llevan una temporada sin actualizarse, así que no
+    debe aportar patas a ningún boleto.
+    """
+    sql = "SELECT DISTINCT competicion FROM partidos WHERE jugado = 0 AND fecha >= ?"
+    params: list = [desde]
+    if comps:
+        sql += " AND competicion IN (%s)" % ",".join("?" * len(comps))
+        params.extend(comps)
+    return {f["competicion"] for f in con.execute(sql, params).fetchall()}
+
+
 def fechas_competicion(con: sqlite3.Connection, comp: str | None = None,
                        temporada: int | None = None) -> list[str]:
     """Todas las fechas con partidos de la competición objetivo, ordenadas."""

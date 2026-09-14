@@ -37,6 +37,9 @@ from src.fase2_modelo import simulacion as sim
 from src.fase2_modelo.entrenar import entrenar_modelo
 from src.fase2_modelo.predecir_partido import predecir
 from src.fase3_recomendacion.generar_leyes import generar
+from src.fase3_recomendacion.parlay_global import generar_global
+from src.backtesting.calibracion_ligas import RUTA_JSON as RUTA_CALIBRACION
+from src.backtesting.calibracion_ligas import cargar as cargar_calibracion_json
 from src.fase4_interfaz.seguimiento import (
     _evaluar_parlay, _resultado_partido, evaluar, evaluar_rango,
 )
@@ -170,6 +173,48 @@ def cargar_historico(version: str):
     return datos
 
 
+@st.cache_data(show_spinner=False)
+def cargar_calibracion(marca: float):
+    """Ranking de ligas medido por `calibracion_ligas.py`.
+
+    La clave de caché es el mtime del JSON, así que basta con regenerarlo para
+    que la app lo recoja. Si no existe, se devuelve None y la sección sigue
+    funcionando sin filtro de ligas.
+    """
+    return cargar_calibracion_json()
+
+
+def _marca_calibracion() -> float:
+    try:
+        return RUTA_CALIBRACION.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+@st.cache_data(ttl=60 * 10, show_spinner="Cruzando todas las ligas…")
+def parlays_globales(version: str, fecha: str, marca_cal: float):
+    """Los 6 boletos multi-liga del día.
+
+    Deliberadamente NO lleva `comp` en la clave: esta sección es global, así que
+    cambiar de competición en la barra lateral no debe invalidarla.
+    """
+    con = db.conectar()
+    cfg = cargar_config()
+    modelo, _ = cargar_modelo_y_cfg(version)
+    datos = generar_global(con, modelo, cfg, fecha, cargar_calibracion(marca_cal))
+    con.close()
+    return datos
+
+
+@st.cache_data(show_spinner=False)
+def fechas_globales(version: str, desde: str):
+    """Fechas con partidos en CUALQUIER liga (el selector propio de la pestaña)."""
+    con = db.conectar()
+    f = db.fechas_con_partidos(con, desde=desde)
+    con.close()
+    return f
+
+
 def fechas_competicion(version: str, comp: str):
     con = db.conectar()
     filas = con.execute(
@@ -211,15 +256,30 @@ def chip_confianza(nivel: str) -> str:
             f"border:1px solid {c}55'>confianza {nivel}</span>")
 
 
-def _hora_orden(live: dict, local: str, visit: str) -> str:
+def _busca_live(live: dict, mapa: str, local: str, visit: str, espn_id=None):
+    """Dato en vivo de un partido, por espn_id si se conoce y si no por nombres.
+
+    El espn_id es la clave única de verdad; las tuplas (local, visitante) se
+    mantienen porque es lo que usan las pestañas de siempre, pero cruzando 15
+    ligas dejan de ser fiables.
+    """
+    live = live or {}
+    if espn_id:
+        d = live.get(mapa + "_id", {}).get(espn_id)
+        if d:
+            return d
+    return live.get(mapa, {}).get((local, visit))
+
+
+def _hora_orden(live: dict, local: str, visit: str, espn_id=None) -> str:
     """Clave para ordenar partidos por horario (ISO UTC; sin hora van al final)."""
-    h = (live or {}).get("horarios", {}).get((local, visit))
+    h = _busca_live(live, "horarios", local, visit, espn_id)
     return h["utc"] if h and h.get("utc") else "9999"
 
 
-def _hora_mx(live: dict, local: str, visit: str):
+def _hora_mx(live: dict, local: str, visit: str, espn_id=None):
     """Hora del partido 'HH:MM' en hora centro de México, o None si no se conoce."""
-    h = (live or {}).get("horarios", {}).get((local, visit))
+    h = _busca_live(live, "horarios", local, visit, espn_id)
     return h["mx"] if h and h.get("mx") else None
 
 
@@ -246,11 +306,13 @@ def render_pick(rec: dict, con, fecha: str, live: dict = None):
     no (con el marcador real) en cuanto el partido se juega, o el marcador EN VIVO
     si está en curso."""
     chip = chip_confianza(rec["confianza"])
-    hora = _hora_mx(live, rec["local"], rec["visitante"])
+    hora = _hora_mx(live, rec["local"], rec["visitante"], rec.get("espn_id"))
     hora_html = f"🕐 {hora} MX · " if hora else ""
     res = evaluar(con, rec, fecha)
-    score = _resultado_partido(con, rec["local"], rec["visitante"], fecha)
-    vivo = (live or {}).get("vivo", {}).get((rec["local"], rec["visitante"]))
+    score = _resultado_partido(con, rec["local"], rec["visitante"], fecha,
+                               rec.get("competicion"))
+    vivo = _busca_live(live, "vivo", rec["local"], rec["visitante"],
+                       rec.get("espn_id"))
     if res is True:
         clase = "won"; badge = "<span class='res-badge r-won'>PEGÓ ✅</span>"
         score_txt = f"<span class='score'>· marcador {score[0]}-{score[1]}</span>"
@@ -343,7 +405,8 @@ def render_parlay_expander(titulo: str, picks: list, con, fecha: str, live: dict
     label = f"{titulo}  ·  {len(picks)} patas  ·  {cuota_txt}  ·  {estado}"
     with st.expander(label, expanded=False):
         picks_ord = sorted(
-            picks, key=lambda r: _hora_orden(live, r["local"], r["visitante"]))
+            picks, key=lambda r: _hora_orden(live, r["local"], r["visitante"],
+                                             r.get("espn_id")))
         for r in picks_ord:
             render_pick(r, con, fecha, live)
         render_multiplicador(picks)
@@ -559,6 +622,155 @@ def render_eliminatorias(con, modelo, cfg, comp: str, fecha: str, temporada: int
 
 # --- App --------------------------------------------------------------------
 
+def render_ranking_ligas(g: dict):
+    """Tabla de qué ligas entran al boleto y por qué."""
+    filas = []
+    for i in g["ligas"].values():
+        filas.append({
+            "Liga": i["nombre"],
+            "Entra": "✅" if i["elegible"] else "—",
+            "Skill": i["skill"],
+            "Calibración": i["calib"]["segura"],
+            "Picks medidos": i["n"] or None,
+            "Motivo": i["motivo"],
+        })
+    filas.sort(key=lambda r: (r["Entra"] != "✅", -(r["Skill"] or -1)))
+    st.dataframe(pd.DataFrame(filas), hide_index=True, use_container_width=True)
+    st.caption(
+        "**Skill** = cuánto le gana el modelo a la frecuencia histórica de esa "
+        "liga (0.20 es mucho, 0.05 es casi nada). **Calibración** = si acierta "
+        "más (>1) o menos (<1) de lo que declara; ajusta cada probabilidad para "
+        "poder comparar picks de ligas distintas. Medido con walk-forward sobre "
+        "dos temporadas, sin dejar que el modelo vea el futuro.")
+
+
+NOMBRE_BOLETO = {
+    "segura_corto": "🔒 Seguro corto", "segura_largo": "🔒 Seguro largo",
+    "arriesgada_corto": "⚖️ Intermedio corto", "arriesgada_largo": "⚖️ Intermedio largo",
+    "sonador_corto": "🚀 Soñador corto", "sonador_largo": "🚀 Soñador largo",
+}
+
+
+def render_historico_global(cal: dict):
+    """Cuántas veces habría pegado cada boleto multi-liga, día a día."""
+    h = (cal or {}).get("historial") or {}
+    if not h.get("n_dias"):
+        st.info("Aún no hay histórico. Genera el ranking con "
+                "`python -m src.backtesting.calibracion_ligas`.")
+        return
+
+    st.caption(
+        f"**{h['n_dias']} días** evaluados ({h['desde']} → {h['hasta']}). Cada día se "
+        "arma el boleto con un modelo entrenado **solo con el pasado** y con la "
+        "calibración deducida **solo de los días anteriores**: nada de mirar el "
+        "futuro. Un boleto pega si pegan TODAS sus patas.")
+
+    filas = []
+    for clave, t in h["totales"].items():
+        if not t["jugados"]:
+            continue
+        filas.append({
+            "Boleto": NOMBRE_BOLETO.get(clave, clave),
+            "Pegó": f"{t['ganados']}/{t['jugados']}",
+            # Se guardan como fracción (0..1) para el gráfico y se formatean a mano
+            # para la tabla: el `format` de Streamlit aplica printf al valor crudo,
+            # así que un 0.597 con "%.1f%%" saldría como "0.6%".
+            "Acierto real": t["tasa"],
+            "Esperado": t["prob_media"],
+            "Patas (media)": t["patas_media"],
+        })
+    df = pd.DataFrame(filas)
+    tabla = df.copy()
+    for col in ("Acierto real", "Esperado"):
+        tabla[col] = tabla[col].map(lambda v: f"{100*v:.1f}%" if v is not None else "—")
+    st.dataframe(tabla, hide_index=True, use_container_width=True)
+
+    grafico = df.melt(id_vars="Boleto", value_vars=["Acierto real", "Esperado"],
+                      var_name="Serie", value_name="Valor")
+    st.altair_chart(
+        alt.Chart(grafico).mark_bar().encode(
+            x=alt.X("Valor:Q", axis=alt.Axis(format="%"), title=None),
+            y=alt.Y("Boleto:N", sort=None, title=None),
+            color=alt.Color("Serie:N", title=None),
+            yOffset="Serie:N",
+        ).properties(height=260),
+        use_container_width=True)
+    st.caption("Si las dos barras van parejas, el modelo dice la verdad sobre sí mismo.")
+
+
+def render_mejores_ligas(version: str):
+    """Pestaña 5: los boletos del día cruzando todas las ligas elegibles."""
+    st.caption(
+        "Los mismos 6 boletos de siempre, pero **cruzando todas las ligas** en vez "
+        "de una sola competición: así hay parlay todos los días, no solo los días "
+        "de Champions. Solo entran las ligas donde el modelo tiene **medido** que "
+        "acierta.")
+
+    hoy = date.today().isoformat()
+    fechas = fechas_globales(version, "2026-07-01")
+    if not fechas:
+        st.info("No hay partidos en la base.")
+        return
+    futuras = [f for f in fechas if f >= hoy]
+    idx = fechas.index(futuras[0]) if futuras else len(fechas) - 1
+    fecha = st.selectbox("📅 Día", fechas, index=idx, key="fecha_global")
+
+    g = parlays_globales(version, fecha, _marca_calibracion())
+    if not g["n_partidos"]:
+        st.info(f"No hay partidos de ligas elegibles el {fecha}.")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Partidos del día", g["n_partidos"])
+    c2.metric("Ligas elegibles", g["n_ligas_elegibles"])
+    c3.metric("Calibrado el", g["generado_el"] or "—")
+    if not g["calibrado"]:
+        st.warning(
+            "Sin `data/calibracion_ligas.json`: entran todas las ligas vigentes, "
+            "sin filtrar por calidad. Genera el ranking con "
+            "`python -m src.backtesting.calibracion_ligas`.")
+
+    con = db.conectar()
+    # Marcadores en vivo SOLO de las ligas que salen en los boletos: un sábado hay
+    # 14 ligas en juego y el scoreboard de ESPN es una llamada por liga.
+    comps = []
+    for tier in ("segura", "arriesgada", "sonador"):
+        for clave in ("corto", "largo"):
+            for r in g[tier][clave]:
+                if r["competicion"] not in comps:
+                    comps.append(r["competicion"])
+    try:
+        live = mv.aplicar(con, fecha, comps=comps)
+    except Exception:
+        live = {}
+
+    n_largo = cargar_config().get("parlay_global", {}).get("n_largo", 10)
+    tope = cargar_config().get("parlay_global", {}).get("max_por_mercado", 4)
+
+    st.markdown("##### 🎟️ Parlays cortos")
+    for tier, titulo in (("segura", "🔒 Seguro"), ("arriesgada", "⚖️ Intermedio"),
+                         ("sonador", "🚀 Soñador")):
+        render_parlay_expander(titulo, g[tier]["corto"], con, fecha, live)
+
+    st.markdown("##### 🧱 Parlays largos")
+    for tier, titulo in (("segura", "🔒 Seguro largo"),
+                         ("arriesgada", "⚖️ Intermedio largo"),
+                         ("sonador", "🚀 Soñador largo")):
+        render_parlay_expander(titulo, g[tier]["largo"], con, fecha, live)
+        c = g[tier]["combinada_largo"]
+        if c and c["n"] < n_largo:
+            st.caption(
+                f"↳ {titulo}: solo {c['n']} patas. No hay más picks del día que "
+                f"pasen el corte sin repetir un mismo mercado más de {tope} veces.")
+
+    with st.expander("📋 Ranking de ligas · dónde acierta el modelo", expanded=False):
+        render_ranking_ligas(g)
+    with st.expander("🏆 Histórico de estos boletos · ¿cuántas veces pegan?",
+                     expanded=False):
+        render_historico_global(cargar_calibracion(_marca_calibracion()))
+    con.close()
+
+
 def main():
     # Selector de competición: se aplica ANTES de leer nada de la base, porque
     # decide qué partidos son "los del día".
@@ -656,9 +868,10 @@ def cuerpo(version: str, fecha: str, comp: str):
     cc2.button("🔄 Refrescar ya", key="refresh_live")
     partidos = db.calendario_de_fecha(con, fecha, comp)
 
-    tab1, tab2, tab3, tab4 = st.tabs(
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
         ["🎯 Picks del día", "📊 Detalle por partido",
-         "🏁 Clasificación proyectada", "🏆 Histórico de aciertos"])
+         "🏁 Clasificación proyectada", "🏆 Histórico de aciertos",
+         "🌍 Mejores Ligas"])
 
     # --- TAB 1: las 3 Leyes ---
     with tab1:
@@ -681,6 +894,13 @@ def cuerpo(version: str, fecha: str, comp: str):
             render_parlay_expander("🔒 Seguro largo", leyes["segura"], con, fecha, live)
             render_parlay_expander("⚖️ Intermedio largo", leyes["arriesgada"], con, fecha, live)
             render_parlay_expander("🚀 Soñador largo", leyes["sonador"], con, fecha, live)
+
+    # --- TAB 5: parlays cruzando todas las ligas ---
+    # Lleva su PROPIO selector de fecha: el de la barra lateral solo lista los días
+    # de la competición activa, así que si la Champions no juega el sábado, ese
+    # sábado no sería ni seleccionable desde aquí.
+    with tab5:
+        render_mejores_ligas(version)
 
     # --- TAB 2: detalle por partido ---
     with tab2:
