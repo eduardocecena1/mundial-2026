@@ -9,3 +9,8 @@ font = "sans serif"
 
 [server]
 headless = true
+
+# TEMPORAL: destapa el mensaje de error completo en Streamlit Cloud, que por
+# defecto lo censura ("redacted to prevent data leaks"). Quitar tras diagnosticar.
+[client]
+showErrorDetails = "full"
