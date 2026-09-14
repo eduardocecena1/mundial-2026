@@ -10,7 +10,12 @@ font = "sans serif"
 [server]
 headless = true
 
-# TEMPORAL: destapa el mensaje de error completo en Streamlit Cloud, que por
-# defecto lo censura ("redacted to prevent data leaks"). Quitar tras diagnosticar.
+# Muestra el mensaje de error completo en vez del censurado por defecto
+# ("redacted to prevent data leaks"). Se dejó activado a propósito: el 2026-09-14
+# apareció un AttributeError en el PRIMER arranque en frío tras un despliegue que
+# no se volvió a reproducir, y sin esto el mensaje real es imposible de ver (la
+# traza queda dentro del iframe y la app no deja hacer scroll hasta ella).
+# Lo único que expone son rutas de un repo que ya es público. Se puede quitar
+# cuando la app lleve unas semanas estable.
 [client]
 showErrorDetails = "full"
