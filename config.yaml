@@ -87,6 +87,25 @@ leyes:
   arriesgada_max: 0.65
   # por debajo -> material para la Ley Soñador
 
+# Parlay multi-liga — sección "Mejores Ligas".
+# Cruza TODAS las ligas vigentes en vez de una sola competición, para tener un
+# boleto todos los días y no solo los días de Champions.
+parlay_global:
+  n_corto: 3            # patas del boleto corto
+  n_largo: 10           # patas del boleto largo (tope duro; un sábado hay 56
+                        # partidos y "todos" daría una probabilidad de ~0)
+  max_por_mercado: 4    # máx. patas del mismo mercado en un boleto. Sin esto,
+                        # 9 de cada 10 patas salen "gana o empata": segurísimo,
+                        # monótono y de pago bajo. Medido sobre 5 sábados:
+                        #   tope 3 -> 16.1% | 4 -> 20.4% | 5 -> 24.5% | sin -> 30.6%
+  min_picks_liga: 300   # muestra mínima en la calibración para fiarse de una liga
+  skill_min: 0.08       # skill mínimo del modelo en esa liga. Con 2 temporadas la
+                        # CALIBRACIÓN resultó casi uniforme entre ligas
+                        # (0.962-1.015), mientras el SKILL varía 4x
+                        # (0.054 en Austria a 0.215 en Portugal): es el skill el
+                        # que de verdad separa "donde el modelo sabe" de
+                        # "donde adivina".
+
 # Simulación Monte Carlo de la fase liga (Paso 7)
 simulacion:
   n_sims: 10000

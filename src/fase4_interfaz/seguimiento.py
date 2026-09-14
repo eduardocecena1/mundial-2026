@@ -27,22 +27,30 @@ from ..fase3_recomendacion.generar_leyes import generar
 SIN_GOLES = object()
 
 
-def _partido(con, local, visit, fecha):
-    """Fila del partido jugado (o None si no está)."""
-    return con.execute(
-        """SELECT espn_id, goles_local, goles_visitante FROM partidos
-            WHERE jugado=1 AND fecha=? AND local=? AND visitante=?""",
-        (fecha, local, visit),
-    ).fetchone()
+def _partido(con, local, visit, fecha, comp: str | None = None):
+    """Fila del partido jugado (o None si no está).
+
+    `comp` desambigua cuando se cruzan varias ligas: (fecha, local, visitante)
+    deja de ser único en cuanto hay 17 competiciones en juego el mismo día.
+    Se necesita `competicion` en el SELECT para poder pedirle a ESPN los goles
+    del partido contra su propio endpoint (ver `_primer_equipo_gol`).
+    """
+    sql = """SELECT espn_id, competicion, goles_local, goles_visitante FROM partidos
+              WHERE jugado=1 AND fecha=? AND local=? AND visitante=?"""
+    args = [fecha, local, visit]
+    if comp:
+        sql += " AND competicion=?"
+        args.append(comp)
+    return con.execute(sql, args).fetchone()
 
 
-def _resultado_partido(con, local, visit, fecha):
+def _resultado_partido(con, local, visit, fecha, comp: str | None = None):
     """Marcador real de un partido jugado (o None si no está)."""
-    f = _partido(con, local, visit, fecha)
+    f = _partido(con, local, visit, fecha, comp)
     return (f["goles_local"], f["goles_visitante"]) if f else None
 
 
-def _primer_equipo_gol(con, local, visit, fecha):
+def _primer_equipo_gol(con, local, visit, fecha, comp: str | None = None):
     """Equipo que anotó primero, o None si no se puede saber.
 
     Se empareja por espn_id: en clubes hay eliminatorias de ida y vuelta entre
@@ -53,7 +61,7 @@ def _primer_equipo_gol(con, local, visit, fecha):
     vuelo y se guardan. Sin esto, un solo pick de 'primer gol' sin resolver
     anula el parlay del día entero en las estadísticas (`_acumula_combo`).
     """
-    p = _partido(con, local, visit, fecha)
+    p = _partido(con, local, visit, fecha, comp)
     if p is None:
         return None
 
@@ -76,9 +84,12 @@ def _primer_equipo_gol(con, local, visit, fecha):
         return SIN_GOLES
 
     from ..fase1_datos.marcadores_vivo import _guardar_goles
-    from ..config import competicion_id
     try:
-        if _guardar_goles(con, competicion_id(), p["espn_id"], fecha):
+        # La competición del PARTIDO, no la activa: el endpoint de ESPN es por
+        # competición, así que pedir un partido de LaLiga contra el slug de la
+        # Champions no devuelve nada y el pick quedaba sin evaluar para siempre
+        # (y eso anula el boleto entero en `_acumula_combo`).
+        if _guardar_goles(con, p["competicion"], p["espn_id"], fecha):
             con.commit()
             return _consulta()
     except Exception:
@@ -87,8 +98,14 @@ def _primer_equipo_gol(con, local, visit, fecha):
 
 
 def evaluar(con, rec: dict, fecha: str):
-    """¿Acertó la apuesta? Devuelve True/False, o None si no es evaluable."""
-    res = _resultado_partido(con, rec["local"], rec["visitante"], fecha)
+    """¿Acertó la apuesta? Devuelve True/False, o None si no es evaluable.
+
+    Si el pick trae `competicion` (los del boleto multi-liga la llevan), se usa
+    para desambiguar: cruzando 15 ligas, (fecha, local, visitante) deja de
+    identificar un partido sin ambigüedad.
+    """
+    comp = rec.get("competicion")
+    res = _resultado_partido(con, rec["local"], rec["visitante"], fecha, comp)
     if res is None:
         return None
     gl, gv = res
@@ -114,7 +131,7 @@ def evaluar(con, rec: dict, fecha: str):
     if m == "marcador":
         return s == f"{gl}-{gv}"
     if m == "1erGol":
-        primero = _primer_equipo_gol(con, rec["local"], rec["visitante"], fecha)
+        primero = _primer_equipo_gol(con, rec["local"], rec["visitante"], fecha, comp)
         if primero is None:
             return None
         if primero is SIN_GOLES:

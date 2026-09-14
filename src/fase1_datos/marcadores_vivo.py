@@ -72,37 +72,19 @@ def _guardar_goles(con, comp: str, espn_id: str, fecha: str) -> int:
     return len(goles)
 
 
-def aplicar(con, fecha_iso: str, cfg: dict | None = None) -> dict:
-    """Aplica los marcadores de ESPN a la base para una fecha.
+def _aplicar_una(con, fecha_iso: str, comp: str, acc: dict) -> None:
+    """Aplica los marcadores de UNA competición, acumulando en `acc`.
 
-    Devuelve {"finales", "vivo", "horarios", "goles"}:
-      - 'finales'  = nº de partidos terminados que se guardaron como jugados.
-      - 'vivo'     = {(local, visitante): {"gl","gv","estado"}} de los partidos
-                     en curso (para mostrar "EN VIVO", sin grabarlos como jugados).
-      - 'horarios' = {(local, visitante): {"utc","mx"}}.
-      - 'goles'    = nº de goles nuevos guardados en `goleadores`.
-
-    Ante cualquier fallo de red devuelve la estructura vacía COMPLETA (con todas
-    las claves) para que la interfaz no tenga que defenderse de un dict a medias.
+    El scoreboard de ESPN es por competición: no hay endpoint global, así que un
+    día multi-liga son N llamadas. Por eso el llamador acota `comps` a las ligas
+    que de verdad va a pintar.
     """
-    vacio = {"finales": 0, "vivo": {}, "horarios": {}, "goles": 0}
-    cfg = cfg or cargar_config()
-    comp = competicion_id(cfg)
+    partidos_espn = obtener_marcadores(fecha_iso, comp)
 
-    try:
-        partidos_espn = obtener_marcadores(fecha_iso, comp)
-    except Exception:
-        return vacio                      # degradación elegante: sin live, seguimos
-
-    # Lo que tenemos en BD para esa fecha, indexado por espn_id.
+    # Lo que tenemos en BD para esa fecha y liga, indexado por espn_id.
     en_bd = {r["espn_id"]: r for r in con.execute(
         "SELECT espn_id, local, visitante FROM partidos WHERE competicion=? AND fecha=?",
         (comp, fecha_iso)).fetchall()}
-
-    finales = 0
-    goles_nuevos = 0
-    vivo: dict = {}
-    horarios: dict = {}
 
     for p in partidos_espn:
         fila = en_bd.get(p["espn_id"])
@@ -117,23 +99,69 @@ def aplicar(con, fecha_iso: str, cfg: dict | None = None) -> dict:
                 continue
 
         clave = (fila["local"], fila["visitante"])
-        horarios[clave] = {"utc": p["fecha_hora"], "mx": hora_mexico(p["fecha_hora"])}
+        horario = {"utc": p["fecha_hora"], "mx": hora_mexico(p["fecha_hora"])}
+        acc["horarios"][clave] = horario
+        # Indexado también por espn_id: cruzando 15 ligas, (local, visitante) ya
+        # no es una clave única y fiable.
+        acc["horarios_id"][p["espn_id"]] = horario
 
         if p["jugado"]:
             con.execute(
                 "UPDATE partidos SET goles_local=?, goles_visitante=?, jugado=1 "
                 "WHERE espn_id=?",
                 (p["goles_local"], p["goles_visitante"], p["espn_id"]))
-            finales += 1
-            goles_nuevos += _guardar_goles(con, comp, p["espn_id"], fecha_iso)
+            acc["finales"] += 1
+            acc["goles"] += _guardar_goles(con, comp, p["espn_id"], fecha_iso)
         elif p["estado"] not in ESTADOS_NO_INICIADO:
             # En curso: ESPN ya publica el marcador parcial aunque 'jugado' sea 0.
-            vivo[clave] = {"gl": p["marcador_local"] or 0,
-                           "gv": p["marcador_visitante"] or 0,
-                           "estado": p["estado"]}
+            d = {"gl": p["marcador_local"] or 0,
+                 "gv": p["marcador_visitante"] or 0,
+                 "estado": p["estado"]}
+            acc["vivo"][clave] = d
+            acc["vivo_id"][p["espn_id"]] = d
+
+
+def aplicar(con, fecha_iso: str, cfg: dict | None = None,
+            comps: list | None = None, max_comps: int = 8) -> dict:
+    """Aplica los marcadores de ESPN a la base para una fecha.
+
+    Devuelve {"finales", "vivo", "horarios", "vivo_id", "horarios_id", "goles",
+    "comps", "errores"}:
+      - 'finales'    = nº de partidos terminados que se guardaron como jugados.
+      - 'vivo'       = {(local, visitante): {"gl","gv","estado"}} de los partidos
+                       en curso (para mostrar "EN VIVO", sin grabarlos como jugados).
+      - 'horarios'   = {(local, visitante): {"utc","mx"}}.
+      - 'vivo_id' / 'horarios_id' = lo mismo, indexado por espn_id (clave única
+                       de verdad; las tuplas de nombres se conservan para no
+                       romper a los llamadores de siempre).
+      - 'goles'      = nº de goles nuevos guardados en `goleadores`.
+      - 'errores'    = slugs cuya descarga falló.
+
+    `comps=None` mantiene el comportamiento de siempre: solo la competición
+    activa. Con una lista se consultan varias, con tope `max_comps` para no
+    encadenar 14 llamadas a ESPN en un sábado.
+
+    Ante un fallo de red devuelve la estructura vacía COMPLETA (con todas las
+    claves) para que la interfaz no tenga que defenderse de un dict a medias; si
+    falla solo una liga, las demás siguen y el slug se reporta en 'errores'.
+    """
+    cfg = cfg or cargar_config()
+    slugs = list(comps) if comps else [competicion_id(cfg)]
+    slugs = slugs[:max_comps]
+
+    acc = {"finales": 0, "vivo": {}, "horarios": {}, "vivo_id": {},
+           "horarios_id": {}, "goles": 0, "comps": slugs, "errores": []}
+
+    for comp in slugs:
+        try:
+            _aplicar_una(con, fecha_iso, comp, acc)
+        except Exception:
+            # Degradación por liga: que la Premier falle no debe dejar sin hora
+            # a los partidos de LaLiga.
+            acc["errores"].append(comp)
 
     con.commit()
-    return {"finales": finales, "vivo": vivo, "horarios": horarios, "goles": goles_nuevos}
+    return acc
 
 
 if __name__ == "__main__":

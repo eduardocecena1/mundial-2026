@@ -1,0 +1,740 @@
+{
+ "historial": {
+  "desde": "2024-08-13",
+  "hasta": "2026-09-13",
+  "n_dias": 406,
+  "totales": {
+   "segura_corto": {
+    "jugados": 397,
+    "ganados": 237,
+    "tasa": 0.597,
+    "prob_media": 0.6442,
+    "patas_media": 2.9
+   },
+   "segura_largo": {
+    "jugados": 397,
+    "ganados": 118,
+    "tasa": 0.2972,
+    "prob_media": 0.3118,
+    "patas_media": 6.6
+   },
+   "arriesgada_corto": {
+    "jugados": 403,
+    "ganados": 88,
+    "tasa": 0.2184,
+    "prob_media": 0.2438,
+    "patas_media": 2.9
+   },
+   "arriesgada_largo": {
+    "jugados": 403,
+    "ganados": 18,
+    "tasa": 0.0447,
+    "prob_media": 0.0583,
+    "patas_media": 7.1
+   },
+   "sonador_corto": {
+    "jugados": 406,
+    "ganados": 4,
+    "tasa": 0.0099,
+    "prob_media": 0.0039,
+    "patas_media": 2.9
+   },
+   "sonador_largo": {
+    "jugados": 406,
+    "ganados": 3,
+    "tasa": 0.0074,
+    "prob_media": 0.0011,
+    "patas_media": 7.5
+   }
+  }
+ },
+ "global": {
+  "segura": {
+   "n": 20287,
+   "aciertos": 15400,
+   "p_real": 0.7591,
+   "p_declarada": 0.774,
+   "sesgo": 0.9808
+  },
+  "arriesgada": {
+   "n": 18554,
+   "aciertos": 10294,
+   "p_real": 0.5548,
+   "p_declarada": 0.5615,
+   "sesgo": 0.9881
+  },
+  "sonador": {
+   "n": 11334,
+   "aciertos": 1396,
+   "p_real": 0.1232,
+   "p_declarada": 0.1226,
+   "sesgo": 1.0045
+  }
+ },
+ "ligas": {
+  "aut.1": {
+   "nombre": "Bundesliga Austria",
+   "n_partidos": 425,
+   "rps": 0.22,
+   "rps_base": 0.2327,
+   "skill": 0.0545,
+   "segura": {
+    "n": 754,
+    "aciertos": 551,
+    "p_real": 0.7308,
+    "p_declarada": 0.759,
+    "calib_cruda": 0.9628,
+    "calib": 0.9658
+   },
+   "arriesgada": {
+    "n": 692,
+    "aciertos": 364,
+    "p_real": 0.526,
+    "p_declarada": 0.5506,
+    "calib_cruda": 0.9554,
+    "calib": 0.9612
+   },
+   "sonador": {
+    "n": 425,
+    "aciertos": 57,
+    "p_real": 0.1341,
+    "p_declarada": 0.1233,
+    "calib_cruda": 1.088,
+    "calib": 1.0662
+   }
+  },
+  "bel.1": {
+   "nombre": "Pro League",
+   "n_partidos": 677,
+   "rps": 0.2065,
+   "rps_base": 0.2292,
+   "skill": 0.0988,
+   "segura": {
+    "n": 1211,
+    "aciertos": 899,
+    "p_real": 0.7424,
+    "p_declarada": 0.7663,
+    "calib_cruda": 0.9688,
+    "calib": 0.9701
+   },
+   "arriesgada": {
+    "n": 1108,
+    "aciertos": 593,
+    "p_real": 0.5352,
+    "p_declarada": 0.5533,
+    "calib_cruda": 0.9672,
+    "calib": 0.9697
+   },
+   "sonador": {
+    "n": 677,
+    "aciertos": 87,
+    "p_real": 0.1285,
+    "p_declarada": 0.1233,
+    "calib_cruda": 1.0419,
+    "calib": 1.0351
+   }
+  },
+  "den.1": {
+   "nombre": "Superliga Danesa",
+   "n_partidos": 432,
+   "rps": 0.2114,
+   "rps_base": 0.2291,
+   "skill": 0.0774,
+   "segura": {
+    "n": 626,
+    "aciertos": 454,
+    "p_real": 0.7252,
+    "p_declarada": 0.7586,
+    "calib_cruda": 0.956,
+    "calib": 0.9608
+   },
+   "arriesgada": {
+    "n": 820,
+    "aciertos": 474,
+    "p_real": 0.578,
+    "p_declarada": 0.5732,
+    "calib_cruda": 1.0084,
+    "calib": 1.0053
+   },
+   "sonador": {
+    "n": 432,
+    "aciertos": 51,
+    "p_real": 0.1181,
+    "p_declarada": 0.113,
+    "calib_cruda": 1.045,
+    "calib": 1.0346
+   }
+  },
+  "eng.1": {
+   "nombre": "Premier League",
+   "n_partidos": 795,
+   "rps": 0.205,
+   "rps_base": 0.2313,
+   "skill": 0.1135,
+   "segura": {
+    "n": 1232,
+    "aciertos": 924,
+    "p_real": 0.75,
+    "p_declarada": 0.7668,
+    "calib_cruda": 0.978,
+    "calib": 0.9783
+   },
+   "arriesgada": {
+    "n": 1459,
+    "aciertos": 850,
+    "p_real": 0.5826,
+    "p_declarada": 0.5682,
+    "calib_cruda": 1.0253,
+    "calib": 1.0219
+   },
+   "sonador": {
+    "n": 795,
+    "aciertos": 94,
+    "p_real": 0.1182,
+    "p_declarada": 0.1179,
+    "calib_cruda": 1.0032,
+    "calib": 1.0034
+   }
+  },
+  "esp.1": {
+   "nombre": "LaLiga",
+   "n_partidos": 806,
+   "rps": 0.1978,
+   "rps_base": 0.2261,
+   "skill": 0.1254,
+   "segura": {
+    "n": 1548,
+    "aciertos": 1212,
+    "p_real": 0.7829,
+    "p_declarada": 0.7796,
+    "calib_cruda": 1.0043,
+    "calib": 1.0022
+   },
+   "arriesgada": {
+    "n": 1194,
+    "aciertos": 622,
+    "p_real": 0.5209,
+    "p_declarada": 0.5585,
+    "calib_cruda": 0.9327,
+    "calib": 0.9389
+   },
+   "sonador": {
+    "n": 806,
+    "aciertos": 132,
+    "p_real": 0.1638,
+    "p_declarada": 0.1322,
+    "calib_cruda": 1.239,
+    "calib": 1.15
+   }
+  },
+  "fra.1": {
+   "nombre": "Ligue 1",
+   "n_partidos": 646,
+   "rps": 0.2064,
+   "rps_base": 0.2326,
+   "skill": 0.113,
+   "segura": {
+    "n": 1120,
+    "aciertos": 841,
+    "p_real": 0.7509,
+    "p_declarada": 0.7675,
+    "calib_cruda": 0.9784,
+    "calib": 0.9787
+   },
+   "arriesgada": {
+    "n": 1134,
+    "aciertos": 630,
+    "p_real": 0.5556,
+    "p_declarada": 0.5561,
+    "calib_cruda": 0.999,
+    "calib": 0.9977
+   },
+   "sonador": {
+    "n": 646,
+    "aciertos": 70,
+    "p_real": 0.1084,
+    "p_declarada": 0.1197,
+    "calib_cruda": 0.9051,
+    "calib": 0.9239
+   }
+  },
+  "ger.1": {
+   "nombre": "Bundesliga",
+   "n_partidos": 635,
+   "rps": 0.2027,
+   "rps_base": 0.2341,
+   "skill": 0.1341,
+   "segura": {
+    "n": 1075,
+    "aciertos": 818,
+    "p_real": 0.7609,
+    "p_declarada": 0.7763,
+    "calib_cruda": 0.9802,
+    "calib": 0.9802
+   },
+   "arriesgada": {
+    "n": 1059,
+    "aciertos": 587,
+    "p_real": 0.5543,
+    "p_declarada": 0.5751,
+    "calib_cruda": 0.9639,
+    "calib": 0.9669
+   },
+   "sonador": {
+    "n": 635,
+    "aciertos": 59,
+    "p_real": 0.0929,
+    "p_declarada": 0.1121,
+    "calib_cruda": 0.8285,
+    "calib": 0.8622
+   }
+  },
+  "gre.1": {
+   "nombre": "Super League Grecia",
+   "n_partidos": 497,
+   "rps": 0.1937,
+   "rps_base": 0.2331,
+   "skill": 0.169,
+   "segura": {
+    "n": 1000,
+    "aciertos": 780,
+    "p_real": 0.78,
+    "p_declarada": 0.7814,
+    "calib_cruda": 0.9982,
+    "calib": 0.996
+   },
+   "arriesgada": {
+    "n": 736,
+    "aciertos": 411,
+    "p_real": 0.5584,
+    "p_declarada": 0.5567,
+    "calib_cruda": 1.0031,
+    "calib": 1.0005
+   },
+   "sonador": {
+    "n": 497,
+    "aciertos": 79,
+    "p_real": 0.159,
+    "p_declarada": 0.1352,
+    "calib_cruda": 1.176,
+    "calib": 1.1363
+   }
+  },
+  "ita.1": {
+   "nombre": "Serie A",
+   "n_partidos": 795,
+   "rps": 0.1954,
+   "rps_base": 0.2319,
+   "skill": 0.1574,
+   "segura": {
+    "n": 1536,
+    "aciertos": 1185,
+    "p_real": 0.7715,
+    "p_declarada": 0.7769,
+    "calib_cruda": 0.9931,
+    "calib": 0.992
+   },
+   "arriesgada": {
+    "n": 1259,
+    "aciertos": 698,
+    "p_real": 0.5544,
+    "p_declarada": 0.5515,
+    "calib_cruda": 1.0053,
+    "calib": 1.0035
+   },
+   "sonador": {
+    "n": 795,
+    "aciertos": 113,
+    "p_real": 0.1421,
+    "p_declarada": 0.1335,
+    "calib_cruda": 1.0643,
+    "calib": 1.0548
+   }
+  },
+  "ned.1": {
+   "nombre": "Eredivisie",
+   "n_partidos": 670,
+   "rps": 0.1951,
+   "rps_base": 0.2295,
+   "skill": 0.1496,
+   "segura": {
+    "n": 1207,
+    "aciertos": 904,
+    "p_real": 0.749,
+    "p_declarada": 0.778,
+    "calib_cruda": 0.9627,
+    "calib": 0.9647
+   },
+   "arriesgada": {
+    "n": 1131,
+    "aciertos": 646,
+    "p_real": 0.5712,
+    "p_declarada": 0.5649,
+    "calib_cruda": 1.011,
+    "calib": 1.0083
+   },
+   "sonador": {
+    "n": 670,
+    "aciertos": 86,
+    "p_real": 0.1284,
+    "p_declarada": 0.1133,
+    "calib_cruda": 1.133,
+    "calib": 1.1095
+   }
+  },
+  "nor.1": {
+   "nombre": "Eliteserien",
+   "n_partidos": 539,
+   "rps": 0.2069,
+   "rps_base": 0.2308,
+   "skill": 0.1035,
+   "segura": {
+    "n": 922,
+    "aciertos": 679,
+    "p_real": 0.7364,
+    "p_declarada": 0.7641,
+    "calib_cruda": 0.9638,
+    "calib": 0.9661
+   },
+   "arriesgada": {
+    "n": 890,
+    "aciertos": 508,
+    "p_real": 0.5708,
+    "p_declarada": 0.5637,
+    "calib_cruda": 1.0125,
+    "calib": 1.009
+   },
+   "sonador": {
+    "n": 539,
+    "aciertos": 49,
+    "p_real": 0.0909,
+    "p_declarada": 0.1141,
+    "calib_cruda": 0.7971,
+    "calib": 0.85
+   }
+  },
+  "por.1": {
+   "nombre": "Primeira Liga",
+   "n_partidos": 659,
+   "rps": 0.1808,
+   "rps_base": 0.2303,
+   "skill": 0.2147,
+   "segura": {
+    "n": 1318,
+    "aciertos": 1028,
+    "p_real": 0.78,
+    "p_declarada": 0.7869,
+    "calib_cruda": 0.9911,
+    "calib": 0.9901
+   },
+   "arriesgada": {
+    "n": 986,
+    "aciertos": 534,
+    "p_real": 0.5416,
+    "p_declarada": 0.5555,
+    "calib_cruda": 0.9749,
+    "calib": 0.9767
+   },
+   "sonador": {
+    "n": 659,
+    "aciertos": 95,
+    "p_real": 0.1442,
+    "p_declarada": 0.1336,
+    "calib_cruda": 1.0792,
+    "calib": 1.0653
+   }
+  },
+  "sco.1": {
+   "nombre": "Premiership Escocia",
+   "n_partidos": 488,
+   "rps": 0.1995,
+   "rps_base": 0.2308,
+   "skill": 0.1356,
+   "segura": {
+    "n": 896,
+    "aciertos": 675,
+    "p_real": 0.7533,
+    "p_declarada": 0.7737,
+    "calib_cruda": 0.9737,
+    "calib": 0.9747
+   },
+   "arriesgada": {
+    "n": 797,
+    "aciertos": 437,
+    "p_real": 0.5483,
+    "p_declarada": 0.5493,
+    "calib_cruda": 0.9982,
+    "calib": 0.9966
+   },
+   "sonador": {
+    "n": 488,
+    "aciertos": 54,
+    "p_real": 0.1107,
+    "p_declarada": 0.1209,
+    "calib_cruda": 0.9152,
+    "calib": 0.9362
+   }
+  },
+  "sui.1": {
+   "nombre": "Super League Suiza",
+   "n_partidos": 270,
+   "rps": 0.2191,
+   "rps_base": 0.225,
+   "skill": 0.0262,
+   "segura": {
+    "n": 396,
+    "aciertos": 288,
+    "p_real": 0.7273,
+    "p_declarada": 0.7542,
+    "calib_cruda": 0.9643,
+    "calib": 0.9688
+   },
+   "arriesgada": {
+    "n": 494,
+    "aciertos": 283,
+    "p_real": 0.5729,
+    "p_declarada": 0.5646,
+    "calib_cruda": 1.0147,
+    "calib": 1.0085
+   },
+   "sonador": {
+    "n": 270,
+    "aciertos": 35,
+    "p_real": 0.1296,
+    "p_declarada": 0.1162,
+    "calib_cruda": 1.1155,
+    "calib": 1.0759
+   }
+  },
+  "tur.1": {
+   "nombre": "Süper Lig",
+   "n_partidos": 686,
+   "rps": 0.1996,
+   "rps_base": 0.2268,
+   "skill": 0.1198,
+   "segura": {
+    "n": 1201,
+    "aciertos": 940,
+    "p_real": 0.7827,
+    "p_declarada": 0.767,
+    "calib_cruda": 1.0205,
+    "calib": 1.0161
+   },
+   "arriesgada": {
+    "n": 1138,
+    "aciertos": 628,
+    "p_real": 0.5518,
+    "p_declarada": 0.5572,
+    "calib_cruda": 0.9904,
+    "calib": 0.9901
+   },
+   "sonador": {
+    "n": 686,
+    "aciertos": 86,
+    "p_real": 0.1254,
+    "p_declarada": 0.1224,
+    "calib_cruda": 1.0242,
+    "calib": 1.0207
+   }
+  },
+  "uefa.champions": {
+   "nombre": "Champions League",
+   "n_partidos": 396,
+   "rps": 0.1933,
+   "rps_base": 0.2382,
+   "skill": 0.1884,
+   "segura": {
+    "n": 703,
+    "aciertos": 555,
+    "p_real": 0.7895,
+    "p_declarada": 0.7786,
+    "calib_cruda": 1.014,
+    "calib": 1.0082
+   },
+   "arriesgada": {
+    "n": 641,
+    "aciertos": 374,
+    "p_real": 0.5835,
+    "p_declarada": 0.5787,
+    "calib_cruda": 1.0082,
+    "calib": 1.0044
+   },
+   "sonador": {
+    "n": 396,
+    "aciertos": 30,
+    "p_real": 0.0758,
+    "p_declarada": 0.1076,
+    "calib_cruda": 0.7038,
+    "calib": 0.85
+   }
+  },
+  "uefa.champions_qual": {
+   "nombre": "Previa Champions",
+   "n_partidos": 268,
+   "rps": 0.1961,
+   "rps_base": 0.2277,
+   "skill": 0.139,
+   "segura": {
+    "n": 488,
+    "aciertos": 372,
+    "p_real": 0.7623,
+    "p_declarada": 0.7808,
+    "calib_cruda": 0.9764,
+    "calib": 0.9774
+   },
+   "arriesgada": {
+    "n": 420,
+    "aciertos": 234,
+    "p_real": 0.5571,
+    "p_declarada": 0.5691,
+    "calib_cruda": 0.979,
+    "calib": 0.9814
+   },
+   "sonador": {
+    "n": 268,
+    "aciertos": 33,
+    "p_real": 0.1231,
+    "p_declarada": 0.1236,
+    "calib_cruda": 0.9959,
+    "calib": 0.999
+   }
+  },
+  "uefa.europa": {
+   "nombre": "Europa League",
+   "n_partidos": 378,
+   "rps": 0.204,
+   "rps_base": 0.23,
+   "skill": 0.1133,
+   "segura": {
+    "n": 601,
+    "aciertos": 460,
+    "p_real": 0.7654,
+    "p_declarada": 0.7676,
+    "calib_cruda": 0.9971,
+    "calib": 0.9938
+   },
+   "arriesgada": {
+    "n": 676,
+    "aciertos": 372,
+    "p_real": 0.5503,
+    "p_declarada": 0.5679,
+    "calib_cruda": 0.9691,
+    "calib": 0.9725
+   },
+   "sonador": {
+    "n": 378,
+    "aciertos": 38,
+    "p_real": 0.1005,
+    "p_declarada": 0.1158,
+    "calib_cruda": 0.868,
+    "calib": 0.9068
+   }
+  },
+  "uefa.europa.conf": {
+   "nombre": "Conference League",
+   "n_partidos": 306,
+   "rps": 0.2095,
+   "rps_base": 0.2312,
+   "skill": 0.0937,
+   "segura": {
+    "n": 606,
+    "aciertos": 460,
+    "p_real": 0.7591,
+    "p_declarada": 0.7864,
+    "calib_cruda": 0.9653,
+    "calib": 0.9683
+   },
+   "arriesgada": {
+    "n": 451,
+    "aciertos": 240,
+    "p_real": 0.5322,
+    "p_declarada": 0.5609,
+    "calib_cruda": 0.9487,
+    "calib": 0.9586
+   },
+   "sonador": {
+    "n": 306,
+    "aciertos": 35,
+    "p_real": 0.1144,
+    "p_declarada": 0.1284,
+    "calib_cruda": 0.8907,
+    "calib": 0.9281
+   }
+  },
+  "uefa.europa.conf_qual": {
+   "nombre": "Previa Conference",
+   "n_partidos": 732,
+   "rps": 0.2056,
+   "rps_base": 0.2294,
+   "skill": 0.1034,
+   "segura": {
+    "n": 1418,
+    "aciertos": 1046,
+    "p_real": 0.7377,
+    "p_declarada": 0.7812,
+    "calib_cruda": 0.9443,
+    "calib": 0.9478
+   },
+   "arriesgada": {
+    "n": 1095,
+    "aciertos": 588,
+    "p_real": 0.537,
+    "p_declarada": 0.5618,
+    "calib_cruda": 0.9558,
+    "calib": 0.9597
+   },
+   "sonador": {
+    "n": 732,
+    "aciertos": 88,
+    "p_real": 0.1202,
+    "p_declarada": 0.1291,
+    "calib_cruda": 0.9314,
+    "calib": 0.9438
+   }
+  },
+  "uefa.europa_qual": {
+   "nombre": "Previa Europa League",
+   "n_partidos": 234,
+   "rps": 0.1918,
+   "rps_base": 0.2311,
+   "skill": 0.1701,
+   "segura": {
+    "n": 429,
+    "aciertos": 329,
+    "p_real": 0.7669,
+    "p_declarada": 0.7881,
+    "calib_cruda": 0.9731,
+    "calib": 0.9751
+   },
+   "arriesgada": {
+    "n": 374,
+    "aciertos": 221,
+    "p_real": 0.5909,
+    "p_declarada": 0.5683,
+    "calib_cruda": 1.0398,
+    "calib": 1.025
+   },
+   "sonador": {
+    "n": 234,
+    "aciertos": 25,
+    "p_real": 0.1068,
+    "p_declarada": 0.1276,
+    "calib_cruda": 0.8375,
+    "calib": 0.9027
+   }
+  }
+ },
+ "version": 1,
+ "generado_el": "2026-09-14",
+ "ventana": {
+  "desde": "2024-07-01",
+  "hasta": "2026-09-14",
+  "cadencia_dias": 7
+ },
+ "config_modelo": {
+  "vida_media_anios": 1.0,
+  "reg": 1.0,
+  "reg_liga": 0.01,
+  "max_goles": 8
+ }
+}

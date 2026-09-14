@@ -9,6 +9,7 @@ Uso (desde la raíz del proyecto):
     python predicciones.py --fecha 2026-09-30 --actualizar   # baja datos frescos antes
     python predicciones.py --fecha 2026-09-30 --detalle      # + tabla por partido
     python predicciones.py --fecha 2027-02-17 --eliminatorias # probabilidades de pase
+    python predicciones.py --fecha 2026-09-19 --global        # boletos de TODAS las ligas
 """
 
 from __future__ import annotations
@@ -121,6 +122,53 @@ def imprimir_eliminatorias(con, modelo, cfg, fecha: str) -> None:
     print()
 
 
+EMOJI_TIER = {"segura": "🔒", "arriesgada": "⚖️", "sonador": "🚀"}
+NOMBRE_TIER = {"segura": "SEGURO", "arriesgada": "INTERMEDIO", "sonador": "SOÑADOR"}
+
+
+def _cuota(pago) -> str:
+    """Formatea una cuota que puede ir de 1.2x a mil millones (Soñador largo)."""
+    if pago is None:
+        return "—"
+    if pago >= 1e6:
+        return f"x{pago:,.0f}"
+    return f"x{pago:,.2f}"
+
+
+def imprimir_global(g: dict) -> None:
+    """Los 6 boletos multi-liga de una fecha."""
+    print(f"\n{SEP}\n  🌍 PARLAYS DE LAS MEJORES LIGAS · {g['fecha']}\n{SEP}")
+    if not g["n_partidos"]:
+        print("\n  No hay partidos de ligas elegibles en esta fecha.\n")
+        return
+    fuente = (f"calibración del {g['generado_el']}" if g["calibrado"]
+              else "SIN calibrar (falta data/calibracion_ligas.json)")
+    print(f"  {g['n_partidos']} partidos · {g['n_ligas_elegibles']} ligas elegibles "
+          f"· {fuente}")
+
+    fuera = [i for i in g["ligas"].values() if not i["elegible"] and i["motivo"]]
+    if fuera:
+        print("  Fuera del boleto: " +
+              ", ".join(f"{i['nombre']} ({i['motivo']})" for i in fuera))
+
+    for tier in ("segura", "arriesgada", "sonador"):
+        b = g[tier]
+        print(f"\n{'─'*70}\n  {EMOJI_TIER[tier]} {NOMBRE_TIER[tier]}"
+              f"   ({b['n_candidatos']} candidatos del día)")
+        for etiqueta, clave, comb in (("CORTO", "corto", "combinada_corto"),
+                                      ("LARGO", "largo", "combinada_largo")):
+            picks, c = b[clave], b[comb]
+            if not picks:
+                continue
+            print(f"\n   ▸ {etiqueta}: {c['n']} patas · "
+                  f"{100*c['prob']:.3f}% · paga {_cuota(c['pago'])}")
+            for r in picks:
+                print(f"      • [{r['liga'][:18]:<18}] {r['partido'][:40]:<40}")
+                print(f"        {r['apuesta']}  —  {100*r['prob']:.1f}% "
+                      f"(ajustada {100*r['prob_aj']:.1f}%)  pago x{r['pago']}")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Predicciones y apuestas recomendadas de la competición activa.")
@@ -132,6 +180,8 @@ def main():
                         help="Mostrar también la tabla de mercados por partido.")
     parser.add_argument("--eliminatorias", action="store_true",
                         help="Probabilidades de clasificación de las eliminatorias del día.")
+    parser.add_argument("--global", dest="global_", action="store_true",
+                        help="Boletos cruzando TODAS las ligas, no solo la activa.")
     args = parser.parse_args()
 
     cfg = cargar_config()
@@ -144,6 +194,14 @@ def main():
 
     print("Entrenando el modelo con el histórico disponible...")
     modelo = entrenar_modelo(con, cfg)
+
+    if args.global_:
+        from ..backtesting.calibracion_ligas import cargar as cargar_calibracion
+        from ..fase3_recomendacion.parlay_global import generar_global
+        imprimir_global(generar_global(con, modelo, cfg, args.fecha,
+                                       cargar_calibracion()))
+        con.close()
+        return
 
     leyes = generar(con, modelo, cfg, args.fecha)
     imprimir_reporte(leyes, cfg)

@@ -99,11 +99,22 @@ def generar(con, modelo, cfg: dict, fecha: str) -> dict:
 
     for row in partidos:
         loc, vis, neutral = row["local"], row["visitante"], row["neutral"]
-        pred = predecir(con, modelo, cfg, loc, vis, neutral,
-                        competicion=row["competicion"])
+        try:
+            pred = predecir(con, modelo, cfg, loc, vis, neutral,
+                            competicion=row["competicion"])
+        except KeyError:
+            # Equipo sin histórico en el modelo: recién ascendido, filial o rival de
+            # copa. Con una sola competición casi no ocurre (los 36 clubes de Champions
+            # tienen años de datos); cruzando 17 ligas ocurre a diario, y sin este
+            # guardia un solo equipo desconocido tumbaba los picks de TODO el día.
+            continue
         nivel = pred["confianza"]["nivel"]
         cands = _candidatos(pred)
         encab = f"{loc} vs {vis}"
+        # Datos de origen del partido: la vista multi-liga los necesita para etiquetar
+        # cada pata con su liga y para ordenar por hora de inicio.
+        extra = {"competicion": row["competicion"], "fecha_hora": row["fecha_hora"],
+                 "espn_id": row["espn_id"]}
 
         # --- Ley Segura: mejor candidato >= seg_min y confianza no baja ---
         if nivel in ("alto", "medio"):
@@ -115,6 +126,7 @@ def generar(con, modelo, cfg: dict, fecha: str) -> dict:
                     "apuesta": best[2], "prob": best[3],
                     "pago": _pago(best[3]), "confianza": nivel,
                     "motivo": _justificacion(con, pred, fecha, best),
+                    **extra,
                 })
 
         # --- Ley Arriesgada: mejor candidato en la banda media ---
@@ -126,6 +138,7 @@ def generar(con, modelo, cfg: dict, fecha: str) -> dict:
                 "apuesta": best_a[2], "prob": best_a[3],
                 "pago": _pago(best_a[3]), "confianza": nivel,
                 "motivo": _justificacion(con, pred, fecha, best_a),
+                **extra,
             })
 
         # --- Ley Soñador: marcador exacto más probable ---
@@ -136,6 +149,7 @@ def generar(con, modelo, cfg: dict, fecha: str) -> dict:
             "apuesta": f"Marcador exacto {i}-{j}", "prob": pr,
             "pago": _pago(pr), "confianza": nivel,
             "motivo": f"el marcador más probable según el modelo ({100*pr:.0f}%)",
+            **extra,
         })
 
     # Ordenar por probabilidad (las más fiables primero). NO se truncan aquí:

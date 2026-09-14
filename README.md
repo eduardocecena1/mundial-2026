@@ -17,6 +17,7 @@ El proyecto se construye por fases:
 | **2 — Modelo** | Dixon-Coles jerárquico por liga + backtesting validado | ✅ Listo |
 | **3 — Recomendación** | Las 3 "Leyes": Segura / Arriesgada / Soñador | ✅ Listo |
 | **4 — Interfaz** | CLI `predicciones.py` + web Streamlit + histórico de aciertos | ✅ Listo |
+| **5 — Mejores Ligas** | Parlays diarios cruzando las 17 ligas, filtrando por dónde el modelo tiene medido que acierta | ✅ Listo |
 
 ---
 
@@ -195,7 +196,7 @@ streamlit run src/fase4_interfaz/app_streamlit.py
 # luego abre http://localhost:8501 en el navegador
 ```
 
-Cuatro pestañas:
+Cinco pestañas:
 - **🎯 Picks del día** — 6 parlays desplegables (cortos de 3 patas y largos con
   todos los juegos), con marcador en vivo por pata.
 - **📊 Detalle por partido** — tarjeta por encuentro con barra 1X2 visual, goles
@@ -203,6 +204,8 @@ Cuatro pestañas:
 - **🏁 Clasificación proyectada** — Monte Carlo de la fase liga; en febrero pasa
   automáticamente a mostrar las probabilidades de eliminatoria.
 - **🏆 Histórico de aciertos** — métricas y gráfico de cómo acertó cada Ley.
+- **🌍 Mejores Ligas** — los mismos 6 boletos pero cruzando **todas** las ligas, con
+  su propio selector de fecha (ver abajo).
 
 En la barra lateral eliges la **competición** y la fecha.
 
@@ -223,6 +226,83 @@ solo con el pasado):
 | 🚀 Soñador (marcador exacto) | 7% (8/108) | ~10% → coherente |
 
 Las combinadas de 3 patas pegaron 7 de 13 días (Segura) y 4 de 13 (Arriesgada).
+
+---
+
+## Fase 5 — Parlays de las mejores ligas
+
+La pestaña de siempre solo genera picks de la competición activa, así que un día sin
+Champions es un día sin boleto. La pestaña **🌍 Mejores Ligas** cruza las 17
+competiciones con calendario vigente y arma los mismos 6 boletos todos los días.
+
+### Qué es una "liga segura" — se mide, no se supone
+
+La pregunta no es en qué liga manda siempre el mismo equipo (una liga puede estar
+desbalanceada y ser impredecible entre los medianos), sino: **cuando el modelo dice
+75% en la Eredivisie, ¿pega el 75%?**
+
+```bash
+python -m src.backtesting.calibracion_ligas              # ~40 s, 2 temporadas
+python -m src.backtesting.calibracion_ligas --rapido     # cadencia de 30 días
+python -m src.backtesting.calibracion_ligas --detalle    # + el boleto de cada día
+```
+
+Recorre dos temporadas con **walk-forward semanal**: cada semana se reentrena con
+`hasta = inicio de la ventana` y se predicen los 7 días siguientes, así que el modelo
+nunca ve un partido posterior a su corte. El sesgo que queda es de *desactualización*,
+que empuja a la baja — la calibración medida es un **suelo** del acierto real.
+
+Deja `data/calibracion_ligas.json` (14 KB, versionado) con dos números por liga:
+
+| | qué mide | para qué se usa |
+|---|---|---|
+| **skill** | cuánto le gana el modelo a la frecuencia histórica de esa liga | decide **qué ligas entran** (`skill_min: 0.08`) |
+| **calibración** | si acierta más (>1) o menos (<1) de lo que declara | **ajusta la probabilidad** de cada pick para poder compararlos entre ligas |
+
+Medido sobre 20.063 picks Seguros de las 17 ligas, el modelo declara 77.4% y acierta
+75.9%: ligeramente optimista, bien calibrado en conjunto. Por liga:
+
+| | Primeira | Champions | Grecia | Serie A | … | Dinamarca | Austria |
+|---|---|---|---|---|---|---|---|
+| **skill** | 0.215 | 0.175 | 0.172 | 0.160 | | 0.077 | 0.054 |
+
+La **calibración resultó casi uniforme** entre ligas (0.962–1.015) mientras el skill
+varía 4×, así que es el skill el que de verdad separa "donde el modelo sabe" de "donde
+adivina". Austria y Dinamarca quedan fuera del boleto por eso.
+
+### Tope por mercado
+
+Sin restricción, 9 de cada 10 patas del boleto Seguro salen "gana o empata":
+segurísimo, monótono y de pago bajo. Con `max_por_mercado` ninguna apuesta puede
+repetirse más de N veces en un boleto. Medido sobre 5 sábados (parlay de 10 patas):
+
+| tope | 3 | **4** | 5 | 6 | sin tope |
+|---|---|---|---|---|---|
+| probabilidad media | 16.1% | **20.4%** | 24.5% | 26.7% | 30.6% |
+
+### Qué tal van estos boletos
+
+El mismo trabajo offline arma el boleto de **cada uno de los 406 días** de la ventana y
+anota si pegó, usando en cada día solo la calibración deducida de los días anteriores
+(calibración expansiva: usar la final sería mirar el futuro).
+
+| Boleto | Pegó | Acierto real | Esperado |
+|---|---|---|---|
+| 🔒 Seguro corto (3 patas) | 237/397 | **59.7%** | 64.4% |
+| 🔒 Seguro largo (~7 patas) | 118/397 | **29.7%** | 31.2% |
+| ⚖️ Intermedio corto | 88/403 | 21.8% | 24.4% |
+| 🚀 Soñador corto | 4/406 | 1.0% | 0.4% |
+
+### Por consola
+
+```bash
+python predicciones.py --fecha 2026-09-19 --global
+```
+
+### Ajustes
+
+En `config.yaml`, sección `parlay_global`: `n_corto`, `n_largo`, `max_por_mercado`,
+`min_picks_liga` y `skill_min`.
 
 ---
 
